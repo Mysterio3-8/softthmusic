@@ -46,7 +46,7 @@ def run_once(config: Config, db: Database, now: datetime | None = None) -> int:
     log = get_logger()
     log.info("=== Запуск подготовки публикаций ===")
 
-    vk = VKClient(config.vk_token, config.group_id)
+    vk = VKClient(config.vk_group_token, config.vk_user_token, config.group_id)
     slots = compute_publish_datetimes(config.publish_times, now)
     candidates = select_candidates(config, db, config.posts_per_day, now)
 

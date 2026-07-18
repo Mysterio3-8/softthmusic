@@ -14,7 +14,8 @@ class ConfigError(Exception):
 
 @dataclass
 class Config:
-    vk_token: str
+    vk_group_token: str
+    vk_user_token: str
     group_id: int
     channels: list[str]
     max_height: int
@@ -35,19 +36,29 @@ class Config:
 def load_config(config_path: str | Path = "config.yaml", env_path: str | Path = ".env") -> Config:
     load_dotenv(env_path)
 
-    token = os.getenv("VK_TOKEN", "").strip()
-    if not token:
-        raise ConfigError("VK_TOKEN не задан в .env")
+    group_token = os.getenv("VK_GROUP_TOKEN", "").strip()
+    if not group_token:
+        raise ConfigError("VK_GROUP_TOKEN не задан в .env")
+
+    # Загрузка видео в VK возможна ТОЛЬКО user-токеном (групповой -> [5]).
+    # Постинг идёт групповым токеном, user-токен дёргается лишь на upload.
+    user_token = os.getenv("VK_USER_TOKEN", "").strip()
+    if not user_token:
+        raise ConfigError(
+            "VK_USER_TOKEN не задан в .env. Он нужен только для загрузки видео "
+            "(VK не даёт грузить видео групповым токеном, ошибка [5]). "
+            "Постинг всё равно идёт групповым токеном."
+        )
 
     path = Path(config_path)
     if not path.exists():
         raise ConfigError(f"Файл конфигурации не найден: {path}")
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return _build_config(raw, token)
+    return _build_config(raw, group_token, user_token)
 
 
-def _build_config(raw: dict, token: str) -> Config:
+def _build_config(raw: dict, group_token: str, user_token: str) -> Config:
     vk = raw.get("vk") or {}
     youtube = raw.get("youtube") or {}
     publishing = raw.get("publishing") or {}
@@ -72,7 +83,8 @@ def _build_config(raw: dict, token: str) -> Config:
     ad_block = str(raw.get("ad_block", "")).strip()
 
     return Config(
-        vk_token=token,
+        vk_group_token=group_token,
+        vk_user_token=user_token,
         group_id=group_id,
         channels=channels,
         max_height=int(youtube.get("max_height", 480)),

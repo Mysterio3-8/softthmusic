@@ -13,14 +13,27 @@ class VKError(Exception):
 
 
 class VKClient:
-    def __init__(self, token: str, group_id: int) -> None:
+    """Два токена по назначению, чтобы минимизировать нагрузку на user-токен.
+
+    - user-токен: ТОЛЬКО загрузка видео (`video.save`) — групповой токен это не
+      умеет (VK возвращает [5] User authorization failed). 1 вызов на ролик.
+    - групповой токен: постинг (`wall.post`) — редкий и безопасный путь, не
+      провоцирует бан user-токена частыми записями.
+
+    Видео сохраняется в саму группу (`group_id=...`), поэтому владелец вложения —
+    сообщество, и групповой токен корректно прикрепляет его к записи на стене.
+    """
+
+    def __init__(self, group_token: str, user_token: str, group_id: int) -> None:
         self._group_id = group_id
-        self._session = vk_api.VkApi(token=token)
-        self._api = self._session.get_api()
-        self._upload = vk_api.VkUpload(self._session)
+        self._group_api = vk_api.VkApi(token=group_token).get_api()
+
+        user_session = vk_api.VkApi(token=user_token)
+        self._user_api = user_session.get_api()
+        self._upload = vk_api.VkUpload(user_session)
 
     def upload_video(self, file_path: Path, name: str, description: str) -> str:
-        """Загружает видео в сообщество. Возвращает attachment вида videoOWNER_ID."""
+        """Загружает видео В ГРУППУ user-токеном. Возвращает attachment video-GID_ID."""
         try:
             saved = self._upload.video(
                 video_file=str(file_path),
@@ -39,9 +52,9 @@ class VKClient:
         return f"video{owner_id}_{video_id}"
 
     def schedule_post(self, message: str, attachment: str, publish_at: datetime) -> int:
-        """Создаёт отложенную запись на стене сообщества. Возвращает post_id."""
+        """Создаёт отложенную запись на стене сообщества групповым токеном."""
         try:
-            response = self._api.wall.post(
+            response = self._group_api.wall.post(
                 owner_id=-self._group_id,
                 from_group=1,
                 message=message,

@@ -8,7 +8,8 @@ from app.database import Database
 
 def _config(channels):
     return Config(
-        vk_token="t",
+        vk_group_token="g",
+        vk_user_token="u",
         group_id=1,
         channels=channels,
         max_height=480,

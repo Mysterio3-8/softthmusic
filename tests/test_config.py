@@ -15,8 +15,9 @@ def _raw():
 
 
 def test_build_config_ok():
-    config = _build_config(_raw(), "token123")
-    assert config.vk_token == "token123"
+    config = _build_config(_raw(), "group_tok", "user_tok")
+    assert config.vk_group_token == "group_tok"
+    assert config.vk_user_token == "user_tok"
     assert config.group_id == 555
     assert config.owner_id == -555
     assert config.publish_times == ["09:00", "15:00", "21:00"]
@@ -26,14 +27,14 @@ def test_missing_group_id_raises():
     raw = _raw()
     raw["vk"] = {}
     with pytest.raises(ConfigError):
-        _build_config(raw, "token")
+        _build_config(raw, "group_tok", "user_tok")
 
 
 def test_empty_channels_raises():
     raw = _raw()
     raw["youtube"]["channels"] = []
     with pytest.raises(ConfigError):
-        _build_config(raw, "token")
+        _build_config(raw, "group_tok", "user_tok")
 
 
 def test_normalize_times_truncates_extra():
