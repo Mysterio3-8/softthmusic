@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Runtime
+config.yaml
+data/
+downloads/
+logs/
+*.log
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
