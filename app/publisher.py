@@ -7,7 +7,7 @@ from pathlib import Path
 from app.config import Config
 from app.database import Database
 from app.logger import get_logger
-from app.post_builder import build_post_text
+from app.post_builder import build_post_text, clean_description
 from app.schedule_planner import compute_publish_datetimes
 from app.vk_client import VKClient, VKError
 from app.youtube import VideoMeta, YouTubeError, download_video, list_channel_video_ids
@@ -76,8 +76,12 @@ def _process_candidate(
     meta: VideoMeta | None = None
     try:
         meta = download_video(candidate.youtube_id, config.downloads_dir, config.max_height)
-        attachment = vk.upload_video(meta.file_path, meta.title, meta.description)
-        message = build_post_text(meta.title, meta.description, config.ad_block)
+        # Чистим авто-описание YouTube: и из текста поста, и из описания видео,
+        # чтобы служебный боилерплейт не всплывал ни в посте, ни «в дополнение»
+        # под видео.
+        description = clean_description(meta.description)
+        attachment = vk.upload_video(meta.file_path, meta.title, description)
+        message = build_post_text(meta.title, description, config.ad_block)
         vk.schedule_post(message, attachment, slot)
         db.mark_published(candidate.youtube_id, candidate.channel, meta.title)
         log.info("Ролик %s поставлен в очередь на %s", candidate.youtube_id, slot.isoformat())
