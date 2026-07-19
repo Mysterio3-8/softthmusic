@@ -13,6 +13,10 @@ from app.vk_client import VKClient, VKError
 from app.youtube import VideoMeta, YouTubeError, download_video, list_channel_video_ids
 
 
+# Запас кандидатов сверх target — на случай нескачавшихся роликов.
+CANDIDATE_BUFFER = 5
+
+
 @dataclass
 class Candidate:
     youtube_id: str
@@ -50,8 +54,11 @@ def run_once(config: Config, db: Database, now: datetime | None = None) -> int:
     # Один запуск = posts_per_run роликов (по умолч. 1), каждый на ближайший
     # свободный слот. Джоб запускается несколько раз в день (см. systemd-таймер),
     # поэтому видео грузятся по одному, а не пачкой.
-    slots = compute_publish_datetimes(config.publish_times, now)
-    candidates = select_candidates(config, db, config.posts_per_run, now)
+    target = config.posts_per_run
+    slots = compute_publish_datetimes(config.publish_times, now)[:target]
+    # Берём с запасом: если ролик не скачался (напр. «Video unavailable»),
+    # переходим к следующему, чтобы слот не остался пустым.
+    candidates = select_candidates(config, db, target + CANDIDATE_BUFFER, now)
 
     if not candidates:
         log.info("Неопубликованных роликов не найдено — работа завершена")
@@ -59,7 +66,7 @@ def run_once(config: Config, db: Database, now: datetime | None = None) -> int:
 
     published = 0
     for candidate in candidates:
-        if published >= len(slots):
+        if published >= target:
             break
         slot = slots[published]
         if _process_candidate(config, db, vk, candidate, slot):

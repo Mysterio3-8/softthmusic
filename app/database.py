@@ -42,6 +42,8 @@ class Database:
     def should_skip(self, youtube_id: str, now: datetime | None = None) -> bool:
         """Пропустить ролик, если он опубликован или ждёт отложенного ретрая."""
         now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:  # planner передаёт наивное локальное время
+            now = now.astimezone()
         row = self._conn.execute(
             "SELECT status, retry_at FROM videos WHERE youtube_id = ?", (youtube_id,)
         ).fetchone()
