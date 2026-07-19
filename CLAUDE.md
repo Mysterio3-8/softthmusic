@@ -1,7 +1,8 @@
 # YouTube → VK Auto Publisher
 
-**Статус:** 🟡 dev — код готов, тесты зелёные (20), живой прогон с реальными
-YouTube/VK токенами ещё не проводился.
+**Статус:** 🟢 прод — задеплоен на VPS (`/opt/yt-vk-publisher`, systemd-таймер
+ежедневно 04:00 МСК). Live-проверено 2026-07-19: отложенный пост с видео создан
+в группе 240295467 (post_id=12, 18:00 МСК). 20 тестов зелёные.
 
 ## Что это
 
@@ -61,8 +62,15 @@ python app/main.py --schedule                   # постоянный проц�
 - Точные ретраи +1ч/+3ч работают только в `--schedule`. В `--once` (cron)
   ролик с ошибкой берётся заново на следующем суточном прогоне.
 
+## Деплой на VPS
+
+- Код: `/opt/yt-vk-publisher`, свой venv. `.env` + `config.yaml` — через scp (не в git).
+- Юниты: `yt-vk-publisher.service` (oneshot, `TZ=Europe/Moscow`) +
+  `yt-vk-publisher.timer` (`OnCalendar=*-*-* 04:00:00 Europe/Moscow`, `Persistent=true`).
+- Обновить код: `tar ... | ssh news-rewriter-vps "tar x -C /opt/yt-vk-publisher"`.
+- Ручной прогон: `ssh news-rewriter-vps "systemctl start yt-vk-publisher.service"`,
+  лог `/opt/yt-vk-publisher/logs/publisher.log`.
+
 ## Осталось
 
-- Живой прогон: нужен `VK_USER_TOKEN` (пользователь пока дал только групповой).
-  Проверить связку upload(user, в группу) → wall.post(group, attach) на реальном ролике.
-- Возможный gate на слишком большие видео (лимит размера ВК).
+- Возможный gate на слишком большие видео (лимит размера ВК) — пока не встречалось.
