@@ -20,6 +20,7 @@ def test_build_config_ok():
     assert config.vk_user_token == "user_tok"
     assert config.group_id == 555
     assert config.owner_id == -555
+    assert config.posts_per_run == 1  # дефолт: по одному за запуск
     assert config.publish_times == ["09:00", "15:00", "21:00"]
 
 

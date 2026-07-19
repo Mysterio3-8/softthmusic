@@ -20,6 +20,7 @@ class Config:
     channels: list[str]
     max_height: int
     posts_per_day: int
+    posts_per_run: int
     publish_times: list[str]
     ad_block: str
     retry_delays_minutes: list[int]
@@ -77,6 +78,10 @@ def _build_config(raw: dict, group_token: str, user_token: str) -> Config:
     if posts_per_day < 1:
         raise ConfigError("publishing.posts_per_day должен быть >= 1")
 
+    posts_per_run = int(publishing.get("posts_per_run", 1))
+    if posts_per_run < 1:
+        raise ConfigError("publishing.posts_per_run должен быть >= 1")
+
     times = [str(t).strip() for t in (publishing.get("times") or []) if str(t).strip()]
     publish_times = _normalize_times(times, posts_per_day)
 
@@ -89,6 +94,7 @@ def _build_config(raw: dict, group_token: str, user_token: str) -> Config:
         channels=channels,
         max_height=int(youtube.get("max_height", 480)),
         posts_per_day=posts_per_day,
+        posts_per_run=posts_per_run,
         publish_times=publish_times,
         ad_block=ad_block,
         retry_delays_minutes=[int(x) for x in (retry.get("delays_minutes") or [60, 180])],

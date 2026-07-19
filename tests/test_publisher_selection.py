@@ -14,6 +14,7 @@ def _config(channels):
         channels=channels,
         max_height=480,
         posts_per_day=3,
+        posts_per_run=1,
         publish_times=["09:00", "15:00", "21:00"],
         ad_block="ad",
         retry_delays_minutes=[60, 180],

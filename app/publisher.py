@@ -47,8 +47,11 @@ def run_once(config: Config, db: Database, now: datetime | None = None) -> int:
     log.info("=== Запуск подготовки публикаций ===")
 
     vk = VKClient(config.vk_group_token, config.vk_user_token, config.group_id)
+    # Один запуск = posts_per_run роликов (по умолч. 1), каждый на ближайший
+    # свободный слот. Джоб запускается несколько раз в день (см. systemd-таймер),
+    # поэтому видео грузятся по одному, а не пачкой.
     slots = compute_publish_datetimes(config.publish_times, now)
-    candidates = select_candidates(config, db, config.posts_per_day, now)
+    candidates = select_candidates(config, db, config.posts_per_run, now)
 
     if not candidates:
         log.info("Неопубликованных роликов не найдено — работа завершена")
