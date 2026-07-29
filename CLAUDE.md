@@ -20,7 +20,7 @@ YouTube-поток выключен (`yt-vk-publisher.timer` disabled). 71 те�
 ```
 бот Новостей (📦 Софты → 🎵 Загрузить плейлист)
    └─ subprocess ─▶ soundcloud_cli.py enqueue <url>  → строка в albums (pending)
-tg-sc-publisher.timer (каждые 15 мин)
+tg-sc-publisher.timer (каждые 3 мин)
    └─ soundcloud_cli.py tick → album_publisher.tick
         альбом pending    → soundcloud.download_playlist → media.render/concat
                           → vk.upload_video + schedule_post → status=publishing
@@ -82,15 +82,17 @@ python app/main.py                                # старый YouTube-про�
 ## Оформление поста
 
 ```
-🇸🇪 Big Baby Tape — Dragonborn (Album)     ← flag + артист — название (вид)
+🎧 Big Baby Tape — ARGUMENTS & FACTS (Album) | Без цензуры
 
-00:00 1. Gimme the Loot                    ← только у сборника
-02:34 2. Bandana
+00:00 1. FAX                                  ← только у сборника
+01:55 2. Surname
 
-♾ Слушать в Telegram: <listen_url>         ← ведёт на бота
-📢 Канал: <channel_url>
-#big_baby_tape_dragonborn@tgmusic          ← уникален для трека И для альбома
+♾️ Слушать в Telegram бесплатно и без цензуры: <listen_url>
+#big_baby_tape_arguments_facts                ← уникален для трека И для альбома
 ```
+
+Этот же текст идёт **описанием под видео** и **названием видео** (первая строка).
+Строка «📢 Канал» появляется, только если задан `channel_url` — сейчас он пуст.
 
 Всё настраивается в `soundcloud.post` без правки кода. Два момента:
 
@@ -106,8 +108,9 @@ python app/main.py                                # старый YouTube-про�
 
 - Секреты только в `.env`, никогда в config.yaml/коде.
 - Постинг — групповым токеном; user-токен — только загрузка видео.
-- Публикация только отложенная (`wall.post` с `publish_date`), не сразу. «Сейчас» =
-  `album_scheduler.soon()` = +3..12 мин: VK не принимает метку в прошлом.
+- Публикация НЕМЕДЛЕННАЯ (`wall.post` без `publish_date`) — решение владельца
+  2026-07-29. Отсюда шаг таймера 3 мин: минута записи = минута тика, при шаге 15
+  мин все посты падали бы на одни и те же 4 значения минут.
 - Один альбом в работе за раз. Новая ссылка встаёт в очередь, не вклинивается.
 - После публикации трека его файлы удаляются; каталог альбома сносится на финише.
 

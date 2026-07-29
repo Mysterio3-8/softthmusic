@@ -27,21 +27,10 @@ def to_msk(moment: datetime) -> datetime:
         return moment.replace(tzinfo=MOSCOW)
     return moment.astimezone(MOSCOW)
 
+
 # Разброс момента возобновления после ночной паузы. Без него каждый «утренний»
 # пост падал бы ровно в quiet_end — роботизированный тайминг, который и палит бота.
 _RESUME_JITTER_MINUTES = 45
-
-# Небольшой задел для «публикуем сейчас»: инвариант проекта — только отложенные
-# записи, а VK не принимает publish_date в прошлом. Заодно ещё немного рандома.
-_LEAD_MIN_MINUTES = 3
-_LEAD_MAX_MINUTES = 12
-
-
-def soon(now: datetime, rng: random.Random | None = None) -> datetime:
-    """Ближайший момент для отложенной записи «прямо сейчас»."""
-    rng = rng or random.Random()
-    delay = rng.randint(_LEAD_MIN_MINUTES, _LEAD_MAX_MINUTES)
-    return (to_msk(now) + timedelta(minutes=delay)).replace(second=0, microsecond=0)
 
 
 def is_quiet_hour(moment: datetime, quiet_start_hour: int, quiet_end_hour: int) -> bool:

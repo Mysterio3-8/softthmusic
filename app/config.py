@@ -21,7 +21,10 @@ class PostStyle:
     """
 
     flag: str
+    title_suffix: str
+    listen_label: str
     listen_url: str
+    channel_label: str
     channel_url: str
     hashtag_template: str
     hashtag_group: str
@@ -38,9 +41,6 @@ class SoundCloudConfig:
     quiet_start_hour: int
     quiet_end_hour: int
     max_posts_per_day: int
-    album_title_template: str
-    track_title_template: str
-    censorship_suffix: str
     max_track_attempts: int
     work_dir: Path
     post: PostStyle
@@ -177,9 +177,6 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
         quiet_start_hour=quiet_start,
         quiet_end_hour=quiet_end,
         max_posts_per_day=int(raw.get("max_posts_per_day", 5)),
-        album_title_template=str(raw.get("album_title_template", "{name} — {artist} | {suffix}")),
-        track_title_template=str(raw.get("track_title_template", "{name} — {artist} | {suffix}")),
-        censorship_suffix=str(raw.get("censorship_suffix", "без цензуры")),
         max_track_attempts=int(raw.get("max_track_attempts", 3)),
         work_dir=Path(raw.get("work_dir", "downloads/soundcloud")),
         post=_build_post_style(raw.get("post") or {}),
@@ -189,7 +186,10 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
 def _build_post_style(raw: dict) -> PostStyle:
     return PostStyle(
         flag=str(raw.get("flag", "🎧")),
+        title_suffix=str(raw.get("title_suffix", "Без цензуры")),
+        listen_label=str(raw.get("listen_label", "♾️ Слушать в Telegram бесплатно и без цензуры:")),
         listen_url=str(raw.get("listen_url", "")),
+        channel_label=str(raw.get("channel_label", "📢 Канал:")),
         channel_url=str(raw.get("channel_url", "")),
         hashtag_template=str(raw.get("hashtag_template", "{artist}_{name}")),
         hashtag_group=str(raw.get("hashtag_group", "")),

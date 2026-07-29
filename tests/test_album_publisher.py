@@ -20,8 +20,8 @@ class FakeVK:
         self.uploads.append(name)
         return "video-1_1"
 
-    def schedule_post(self, message, attachment, publish_at):
-        self.posts.append((message, publish_at))
+    def post_now(self, message, attachment):
+        self.posts.append(message)
         return len(self.posts)
 
 
@@ -41,15 +41,15 @@ def _config(tmp_path, **overrides) -> Config:
         quiet_start_hour=23,
         quiet_end_hour=9,
         max_posts_per_day=overrides.get("max_posts_per_day", 5),
-        album_title_template="{name} — {artist} | {suffix}",
-        track_title_template="{name} — {artist} | {suffix}",
-        censorship_suffix="без цензуры",
         max_track_attempts=3,
         work_dir=tmp_path / "work",
         post=PostStyle(
             flag="🎧",
+            title_suffix="Без цензуры",
+            listen_label="♾️ Слушать в Telegram бесплатно и без цензуры:",
             listen_url="https://t.me/tgram_music_bot",
-            channel_url="https://t.me/tgramuzuka",
+            channel_label="📢 Канал:",
+            channel_url="",
             hashtag_template="{artist}_{name}",
             hashtag_group="tgmusic",
             track_kind="Single",
@@ -209,3 +209,15 @@ def test_album_starts_once_the_night_is_over(tmp_path, queue):
     outcome = tick(config, queue, vk, notifier, datetime(2026, 7, 29, 9, 30, tzinfo=MOSCOW))
 
     assert outcome != "ночная пауза"
+
+
+def test_publishing_uses_post_now_not_a_scheduled_record(tmp_path, queue):
+    """Владелец отказался от отложки: софт сам просыпается и публикует сразу.
+    FakeVK намеренно НЕ умеет schedule_post — вызов сломал бы тест."""
+    config = _config(tmp_path)
+    album_id = queue.enqueue("https://soundcloud.com/a/sets/b", "Album", "Artist", 0, 42)
+    queue.set_album_status(album_id, ALBUM_PUBLISHING)
+    vk = FakeVK()
+
+    assert not hasattr(vk, "schedule_post")
+    tick(config, queue, vk, FakeNotifier(), datetime(2026, 7, 29, 15, 0, tzinfo=MOSCOW))

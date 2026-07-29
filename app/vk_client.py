@@ -69,3 +69,23 @@ class VKClient:
             "Отложенная запись создана: post_id=%s на %s", post_id, publish_at.isoformat()
         )
         return post_id
+
+    def post_now(self, message: str, attachment: str) -> int:
+        """Публикует запись немедленно (без publish_date).
+
+        Отдельный метод, а не флаг у schedule_post: у «сразу» и «отложить» разная
+        семантика и разные вызовы VK, флаг только прятал бы это.
+        """
+        try:
+            response = self._group_api.wall.post(
+                owner_id=-self._group_id,
+                from_group=1,
+                message=message,
+                attachments=attachment,
+            )
+        except Exception as exc:  # noqa: BLE001 — граница внешнего API
+            raise VKError(f"Не удалось опубликовать запись: {exc}") from exc
+
+        post_id = response.get("post_id")
+        get_logger().info("Запись опубликована сразу: post_id=%s", post_id)
+        return post_id

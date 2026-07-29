@@ -18,12 +18,12 @@ from app.album_db import (
     AlbumQueue,
     AlbumRow,
 )
-from app.album_scheduler import is_quiet_hour, next_publish_moment, now_msk, soon, to_msk
+from app.album_scheduler import is_quiet_hour, next_publish_moment, now_msk, to_msk
 from app.config import Config
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
 from app.notifier import Notifier
-from app.post_builder import build_release_text, build_tracklist, format_title
+from app.post_builder import build_release_header, build_release_text, build_tracklist
 from app.soundcloud import SoundCloudError, Track, covers_are_identical, download_playlist
 from app.vk_client import VKClient, VKError
 
@@ -163,18 +163,19 @@ def _publish_compilation(
     tracks: list[Track], video_path: Path, now: datetime,
 ) -> None:
     settings = config.soundcloud
-    title = format_title(
-        settings.album_title_template, album.title, album.artist, settings.censorship_suffix
-    )
     tracklist = build_tracklist(
         [track.title for track in tracks], [track.duration_s for track in tracks]
+    )
+    title = build_release_header(
+        settings.post, album.artist, album.title, settings.post.album_kind
     )
     message = build_release_text(
         settings.post, album.artist, album.title, settings.post.album_kind, tracklist
     )
 
-    attachment = vk.upload_video(video_path, title, tracklist)
-    vk.schedule_post(message, attachment, soon(now))
+    # Описание видео = текст поста: под записью и в каталоге VK одно и то же.
+    attachment = vk.upload_video(video_path, title, message)
+    vk.post_now(message, attachment)
     queue.log_post(POST_KIND_ALBUM)
 
 
@@ -193,15 +194,13 @@ def _continue_album(
         return _finish_album(config, queue, notifier, album)
 
     artist = track.artist or album.artist
-    title = format_title(
-        settings.track_title_template, track.title, artist, settings.censorship_suffix
-    )
+    title = build_release_header(settings.post, artist, track.title, settings.post.track_kind)
     message = build_release_text(settings.post, artist, track.title, settings.post.track_kind)
     video_path = Path(track.audio_path).with_name(f"track_{track.position:03d}.mp4")
     try:
         render_track_video(Path(track.audio_path), Path(track.cover_path), video_path)
-        attachment = vk.upload_video(video_path, title, "")
-        vk.schedule_post(message, attachment, soon(now))
+        attachment = vk.upload_video(video_path, title, message)
+        vk.post_now(message, attachment)
     except (MediaError, VKError) as exc:
         attempts = queue.mark_track_error(track.id, settings.max_track_attempts)
         get_logger().error("Трек %s (попытка %d): %s", track.title, attempts, exc)

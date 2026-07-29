@@ -41,30 +41,32 @@ soundcloud:
   # Жёсткий предохранитель: окно 14 ч при интервале 3–5 ч даёт 3–4 поста,
   # пятый — уже аномалия, значит что-то пошло не так.
   max_posts_per_day: 5
-  # Плейсхолдеры: {name} {artist} {suffix}. Пустые части выбрасываются вместе
-  # со своим разделителем — трек без автора не даст «Название —  | без цензуры».
-  album_title_template: "{name} — {artist} | {suffix}"
-  track_title_template: "{name} — {artist} | {suffix}"
-  censorship_suffix: "без цензуры"
   # Трек, упавший столько раз подряд, помечается ошибкой и не тормозит очередь.
   max_track_attempts: 3
   work_dir: downloads/soundcloud
 
   # Оформление поста:
-  #   🇸🇪 Imminence — False Light (Single)
-  #   ♾ Слушать в Telegram: <listen_url>
-  #   📢 Канал: <channel_url>
-  #   #imminence@posthardcore
+  #   🎧 Big Baby Tape — ARGUMENTS & FACTS (Album) | Без цензуры
+  #
+  #   00:00 1. FAX
+  #   ...
+  #
+  #   ♾️ Слушать в Telegram бесплатно и без цензуры: <listen_url>
+  #   #big_baby_tape_arguments_facts
+  #
+  # Этот же текст идёт описанием под видео. Пустой url убирает свою строку.
   post:
     # Страны артиста в метаданных SoundCloud нет — флаг ставится руками.
-    # Меняй под релиз или оставь нейтральный эмодзи.
     flag: "🎧"
+    title_suffix: "Без цензуры"
+    listen_label: "♾️ Слушать в Telegram бесплатно и без цензуры:"
     listen_url: "https://t.me/tgram_music_bot"
-    channel_url: "https://t.me/tgramuzuka"
-    # Из чего лепится тег. «{artist}_{name}» — свой тег каждому треку и альбому;
-    # «{artist}» — один общий на исполнителя (тогда все треки альбома совпадут).
+    channel_label: "📢 Канал:"
+    channel_url: ""
+    # «{artist}_{name}» — свой тег каждому треку и альбому;
+    # «{artist}» — один общий на исполнителя.
     hashtag_template: "{artist}_{name}"
-    # Короткое имя сообщества VK для тега «#релиз@группа». Пусто → тег без «@».
+    # Короткое имя сообщества VK для «#релиз@группа». Пусто → тег без «@».
     hashtag_group: ""
     track_kind: "Single"
     album_kind: "Album"

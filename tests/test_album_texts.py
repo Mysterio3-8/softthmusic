@@ -1,23 +1,4 @@
-from app.post_builder import build_post_text, build_tracklist, format_title
-
-TEMPLATE = "{name} — {artist} | {suffix}"
-SUFFIX = "без цензуры"
-
-
-def test_full_title_uses_all_parts():
-    assert format_title(TEMPLATE, "Track", "Artist", SUFFIX) == "Track — Artist | без цензуры"
-
-
-def test_missing_artist_does_not_leave_dangling_dash():
-    title = format_title(TEMPLATE, "Track", "", SUFFIX)
-
-    assert title == "Track | без цензуры"
-    assert "—" not in title
-
-
-def test_empty_suffix_drops_its_separator():
-    assert format_title(TEMPLATE, "Track", "Artist", "") == "Track — Artist"
-
+from app.post_builder import build_post_text, build_tracklist
 
 def test_tracklist_accumulates_timecodes():
     tracklist = build_tracklist(["First", "Second", "Third"], [90, 150, 60])
@@ -52,8 +33,11 @@ def _style(**overrides):
 
     base = {
         "flag": "🇸🇪",
+        "title_suffix": "Без цензуры",
+        "listen_label": "♾️ Слушать в Telegram бесплатно и без цензуры:",
         "listen_url": "https://t.me/tgram_music_bot",
-        "channel_url": "https://t.me/tgramuzuka",
+        "channel_label": "📢 Канал:",
+        "channel_url": "",
         "hashtag_template": "{artist}",
         "hashtag_group": "posthardcore",
         "track_kind": "Single",
@@ -69,11 +53,20 @@ def test_single_post_matches_the_requested_layout():
     text = build_release_text(_style(), "Imminence", "False Light", "Single")
 
     assert text == (
-        "🇸🇪 Imminence — False Light (Single)\n\n"
-        "♾ Слушать в Telegram: https://t.me/tgram_music_bot\n"
-        "📢 Канал: https://t.me/tgramuzuka\n"
+        "🇸🇪 Imminence — False Light (Single) | Без цензуры\n\n"
+        "♾️ Слушать в Telegram бесплатно и без цензуры: https://t.me/tgram_music_bot\n"
         "#imminence@posthardcore"
     )
+
+
+def test_channel_line_appears_only_when_its_url_is_set():
+    from app.post_builder import build_release_text
+
+    text = build_release_text(
+        _style(channel_url="https://t.me/tgramuzuka"), "Imminence", "False Light", "Single"
+    )
+
+    assert "📢 Канал: https://t.me/tgramuzuka" in text
 
 
 def test_album_post_carries_the_tracklist_between_header_and_links():
@@ -82,7 +75,7 @@ def test_album_post_carries_the_tracklist_between_header_and_links():
     text = build_release_text(_style(), "Big Baby Tape", "Dragonborn", "Album", "00:00 1. Intro")
     lines = text.splitlines()
 
-    assert lines[0] == "🇸🇪 Big Baby Tape — Dragonborn (Album)"
+    assert lines[0] == "🇸🇪 Big Baby Tape — Dragonborn (Album) | Без цензуры"
     assert "00:00 1. Intro" in lines
     assert lines[-1] == "#big_baby_tape@posthardcore"
 
@@ -129,14 +122,14 @@ def test_empty_links_do_not_leave_blank_lines():
 
     text = build_release_text(_style(listen_url="", channel_url=""), "Imminence", "X", "Single")
 
-    assert text == "🇸🇪 Imminence — X (Single)\n\n#imminence@posthardcore"
+    assert text == "🇸🇪 Imminence — X (Single) | Без цензуры\n\n#imminence@posthardcore"
 
 
 def test_track_without_artist_keeps_the_name_alone():
     from app.post_builder import build_release_text
 
     assert build_release_text(_style(), "", "False Light", "Single").splitlines()[0] == (
-        "🇸🇪 False Light (Single)"
+        "🇸🇪 False Light (Single) | Без цензуры"
     )
 
 

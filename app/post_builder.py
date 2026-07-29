@@ -5,11 +5,6 @@ import re
 # VK ограничивает текст записи на стене ~16000 символами.
 VK_MESSAGE_LIMIT = 16000
 
-# Чем окружают плейсхолдеры в шаблонах названий — по этим символам чистятся
-# «дыры» от пустых значений (у трека может не быть автора).
-_SEPARATOR_CHARS = " \t—–-,"
-_REPEATED_SEPARATOR = re.compile(r"\s*[—–-]\s*(?=[—–-])")
-
 # В теге VK допустимы только буквы/цифры/подчёркивание — на первом же пробеле
 # или дефисе тег обрывается, поэтому чистим заранее.
 _HASHTAG_JUNK = re.compile(r"[^\w]", re.UNICODE)
@@ -38,64 +33,47 @@ def build_hashtag(template: str, artist: str, name: str, group: str) -> str:
     return f"#{slug}@{group}" if group else f"#{slug}"
 
 
+def build_release_header(style, artist: str, name: str, kind: str) -> str:
+    """Первая строка поста: «🎧 Artist — Name (Album) | Без цензуры».
+
+    Она же идёт названием видео — чтобы карточка в каталоге VK и запись на стене
+    назывались одинаково.
+    """
+    line = _release_line(artist, name, kind, style.title_suffix)
+    return " ".join(part for part in (style.flag, line) if part)
+
+
 def build_release_text(style, artist: str, name: str, kind: str, body: str = "") -> str:
     """Пост-релиз: шапка, необязательный треклист, ссылки, тег.
 
-    style — объект с полями flag/listen_url/channel_url/hashtag_group (PostStyle
-    из config). Пустые поля просто не дают своей строки.
+    style — PostStyle из config. Пустой url просто не даёт своей строки, поэтому
+    ссылку на канал можно убрать, не трогая код.
     """
-    header = " ".join(part for part in (style.flag, _release_line(artist, name, kind)) if part)
     links = [
-        line
-        for line in (
-            f"♾ Слушать в Telegram: {style.listen_url}" if style.listen_url else "",
-            f"📢 Канал: {style.channel_url}" if style.channel_url else "",
+        f"{label} {url}".strip()
+        for label, url in (
+            (style.listen_label, style.listen_url),
+            (style.channel_label, style.channel_url),
         )
-        if line
+        if url
     ]
     hashtag = build_hashtag(style.hashtag_template, artist, name, style.hashtag_group)
 
-    blocks = [header]
+    blocks = [build_release_header(style, artist, name, kind)]
     if body.strip():
         blocks.append(body.strip())
     blocks.append("\n".join(links + ([hashtag] if hashtag else [])))
     return "\n\n".join(block for block in blocks if block)
 
 
-def _release_line(artist: str, name: str, kind: str) -> str:
-    """«Artist — Name (Single)». Без артиста — «Name (Single)», без вида — без скобок."""
+def _release_line(artist: str, name: str, kind: str, suffix: str) -> str:
+    """«Artist — Name (Album) | Без цензуры». Пустая часть выпадает со своим разделителем."""
     title = " — ".join(part for part in (artist.strip(), name.strip()) if part)
-    return f"{title} ({kind})" if kind.strip() else title
-
-
-def clean_description(description: str) -> str:
-    """Убирает служебное авто-описание YouTube. Обычное описание оставляет как есть."""
-    text = description.strip()
-    if any(marker in text for marker in _YT_AUTOGEN_MARKERS):
+    if not title:
         return ""
-    return text
-
-
-def format_title(template: str, name: str, artist: str, suffix: str) -> str:
-    """Подставляет шаблон названия из config.yaml, выбрасывая пустые части.
-
-    Плейсхолдеры: {name}, {artist}, {suffix}. Если автора нет, разделитель рядом
-    с ним не должен висеть в воздухе — поэтому склеиваем по непустым кускам.
-    """
-    parts = []
-    for chunk in template.split("|"):
-        filled = _tidy(chunk.format(name=name, artist=artist, suffix=suffix))
-        if filled:
-            parts.append(filled)
-    return " | ".join(parts)
-
-
-def _tidy(text: str) -> str:
-    """Убирает разделители, осиротевшие после пустого плейсхолдера.
-
-    «Track — » -> «Track», «Track —  — суффикс» -> «Track — суффикс».
-    """
-    return _REPEATED_SEPARATOR.sub("", text).strip(_SEPARATOR_CHARS)
+    if kind.strip():
+        title = f"{title} ({kind.strip()})"
+    return f"{title} | {suffix.strip()}" if suffix.strip() else title
 
 
 def build_tracklist(titles: list[str], durations_s: list[int]) -> str:
@@ -116,8 +94,16 @@ def _format_timecode(seconds: int) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def clean_description(description: str) -> str:
+    """Убирает служебное авто-описание YouTube. Обычное описание оставляет как есть."""
+    text = description.strip()
+    if any(marker in text for marker in _YT_AUTOGEN_MARKERS):
+        return ""
+    return text
+
+
 def build_post_text(title: str, description: str, ad_block: str) -> str:
-    """Собирает текст поста: заголовок, описание, рекламный блок.
+    """Собирает текст поста YouTube-потока: заголовок, описание, рекламный блок.
 
     Порядок по ТЗ: оригинальное название -> оригинальное описание -> реклама.
     """
