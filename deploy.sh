@@ -14,8 +14,8 @@ HOST="news-rewriter-vps"
 REMOTE_DIR="/opt/yt-vk-publisher"
 TIMER="tg-sc-publisher.timer"
 
-echo "==> Синхронизация app/ и tests/ на $HOST..."
-tar -czf - --exclude='__pycache__' --exclude='*.pyc' app tests \
+echo "==> Синхронизация app/, tests/ и deploy/ на $HOST..."
+tar -czf - --exclude='__pycache__' --exclude='*.pyc' app tests deploy \
   | ssh "$HOST" "tar -xzf - -C $REMOTE_DIR"
 
 echo "==> Проверка импортов на сервере..."
@@ -27,7 +27,11 @@ import app.media
 import app.soundcloud_cli
 ' " || { echo "!! Импорты сломаны — таймер НЕ тронут, старый код продолжает работать."; exit 1; }
 
-echo "==> Импорты чистые. Перезапуск $TIMER..."
-ssh "$HOST" "systemctl restart $TIMER && systemctl is-active $TIMER"
+echo "==> Импорты чистые. Обновление юнитов и перезапуск $TIMER..."
+# Правку .timer/.service из репозитория надо доносить до /etc/systemd — иначе
+# сервер молча живёт со старым расписанием (поймано 2026-07-29).
+ssh "$HOST" "cp $REMOTE_DIR/deploy/tg-sc-publisher.{service,timer} /etc/systemd/system/ \
+  && systemctl daemon-reload \
+  && systemctl restart $TIMER && systemctl is-active $TIMER"
 
 echo "==> Готово."
