@@ -138,3 +138,13 @@ def test_track_without_artist_keeps_the_name_alone():
     assert build_release_text(_style(), "", "False Light", "Single").splitlines()[0] == (
         "🇸🇪 False Light (Single)"
     )
+
+
+def test_dropped_symbol_does_not_leave_double_underscore():
+    """«ARGUMENTS & FACTS»: «&» выброшен, но щели после себя оставить не должен."""
+    from app.post_builder import build_hashtag
+
+    tag = build_hashtag("{artist}_{name}", "Big Baby Tape", "ARGUMENTS & FACTS", "tgmusic")
+
+    assert tag == "#big_baby_tape_arguments_facts@tgmusic"
+    assert "__" not in tag

@@ -13,6 +13,7 @@ _REPEATED_SEPARATOR = re.compile(r"\s*[—–-]\s*(?=[—–-])")
 # В теге VK допустимы только буквы/цифры/подчёркивание — на первом же пробеле
 # или дефисе тег обрывается, поэтому чистим заранее.
 _HASHTAG_JUNK = re.compile(r"[^\w]", re.UNICODE)
+_UNDERSCORE_RUN = re.compile(r"_{2,}")
 
 # Маркеры авто-сгенерированного описания YouTube Music (Art Tracks / Topic).
 # У таких роликов ВСЁ описание — служебный боилерплейт («Provided to YouTube
@@ -29,7 +30,9 @@ def build_hashtag(template: str, artist: str, name: str, group: str) -> str:
     иначе тег обрывается на первом же пробеле или дефисе.
     """
     raw = template.format(artist=artist, name=name).lower()
-    slug = _HASHTAG_JUNK.sub("", raw.replace(" ", "_")).strip("_")
+    # «ARGUMENTS & FACTS»: «&» выбрасывается и оставляет двойное подчёркивание —
+    # схлопываем, иначе тег выглядит как опечатка.
+    slug = _UNDERSCORE_RUN.sub("_", _HASHTAG_JUNK.sub("", raw.replace(" ", "_"))).strip("_")
     if not slug:
         return ""
     return f"#{slug}@{group}" if group else f"#{slug}"
