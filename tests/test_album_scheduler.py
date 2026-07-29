@@ -85,3 +85,32 @@ def test_next_moment_is_moscow_aware():
 
     assert moment.tzinfo is not None
     assert moment.utcoffset() == MOSCOW.utcoffset(moment.replace(tzinfo=None))
+
+
+def test_disabled_night_window_lets_posts_through_at_any_hour():
+    """Владелец разрешил постить круглосуточно (quiet_start == quiet_end).
+    Ночные часы обязаны проходить, а момент — не уезжать на утро."""
+    night = datetime(2026, 7, 30, 3, 0, tzinfo=MOSCOW)
+
+    assert not is_quiet_hour(night, 0, 0)
+
+    moment = next_publish_moment(night, 160, 235, 0, 0, random.Random(3))
+    delta_minutes = (moment - night).total_seconds() / 60
+    assert 160 <= delta_minutes <= 235, "без ночного окна сдвига быть не должно"
+
+
+def test_seven_posts_a_day_fit_into_the_configured_interval():
+    """Арифметика режима «7 в сутки»: 1440 / 7 = 205 мин — потолок среднего
+    интервала. Настройки обязаны давать чуть больше семи, чтобы ограничителем
+    работал суточный лимит, а не расписание."""
+    from datetime import timedelta
+
+    start = datetime(2026, 7, 30, 9, 0, tzinfo=MOSCOW)
+    rng = random.Random(11)
+    moment = start
+    count = 0
+    while moment < start + timedelta(days=1):
+        moment = next_publish_moment(moment, 160, 235, 0, 0, rng)
+        count += 1
+
+    assert count >= 7, f"расписание не дотягивает до 7 постов в сутки: {count}"
