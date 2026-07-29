@@ -43,6 +43,12 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
     if _daily_limit_reached(queue, settings.max_posts_per_day, now):
         return "суточный лимит постов исчерпан"
 
+    # Ночь проверяется ДО ветвления: сборник — такая же запись в сообществе, как
+    # трек, и ночью палит бота ровно так же. Раньше проверка стояла только на
+    # ветке треков, и плейлист, брошенный под утро, публиковался в 06:00.
+    if is_quiet_hour(now, settings.quiet_start_hour, settings.quiet_end_hour):
+        return "ночная пауза"
+
     album = queue.active_album()
     if album is not None:
         return _continue_album(config, queue, vk, notifier, album, now)
@@ -181,8 +187,6 @@ def _continue_album(
 
     if album.next_post_at and now < to_msk(album.next_post_at):
         return f"рано: следующий трек в {to_msk(album.next_post_at):%d.%m %H:%M}"
-    if is_quiet_hour(now, settings.quiet_start_hour, settings.quiet_end_hour):
-        return "ночная пауза"
 
     track = queue.next_pending_track(album.id)
     if track is None:

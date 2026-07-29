@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.album_db import ALBUM_DONE, ALBUM_PUBLISHING, AlbumQueue
+from app.album_scheduler import MOSCOW
 from app.album_publisher import tick
 from app.config import Config, PostStyle, SoundCloudConfig
 
@@ -181,3 +182,30 @@ def test_next_album_starts_only_after_previous_is_done(tmp_path, queue):
 
     assert queue.active_album().title == "First"
     assert queue.next_pending_album().title == "Second"
+
+
+def test_night_pause_also_blocks_starting_a_new_album(tmp_path, queue):
+    """Сборник — такая же запись в сообществе, как трек: ночью он тоже ждёт.
+    Раньше проверка стояла только на ветке треков, и плейлист, брошенный под
+    утро, публиковался в 06:00 (поймано живым прогоном 2026-07-29)."""
+    config = _config(tmp_path)
+    queue.enqueue("https://soundcloud.com/a/sets/b", "Album", "Artist", 5, None)
+    vk, notifier = FakeVK(), FakeNotifier()
+
+    outcome = tick(config, queue, vk, notifier, datetime(2026, 7, 29, 5, 54, tzinfo=MOSCOW))
+
+    assert outcome == "ночная пауза"
+    assert vk.uploads == [], "ночью не должно быть даже загрузки видео"
+    assert queue.next_pending_album().title == "Album", "альбом остался ждать утра"
+
+
+def test_album_starts_once_the_night_is_over(tmp_path, queue):
+    config = _config(tmp_path)
+    queue.enqueue("https://soundcloud.com/a/sets/b", "Album", "Artist", 5, None)
+    vk, notifier = FakeVK(), FakeNotifier()
+
+    # 09:30 МСК — окно уже открыто, тик берётся за альбом (упрётся в сеть, но
+    # важно, что он вообще дошёл до работы, а не отбился ночной паузой).
+    outcome = tick(config, queue, vk, notifier, datetime(2026, 7, 29, 9, 30, tzinfo=MOSCOW))
+
+    assert outcome != "ночная пауза"
