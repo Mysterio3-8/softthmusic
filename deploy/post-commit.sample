@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Хук «коммит = деплой». Git не версионирует .git/hooks — ставить руками на каждом
+# новом клоне:
+#
+#   cp deploy/post-commit.sample .git/hooks/post-commit
+#   chmod +x .git/hooks/post-commit
+#
+# Деплой не должен ронять коммит: если VPS недоступен, коммит уже создан и остаётся
+# в истории — просто прогони deploy.sh руками, когда связь вернётся.
+set -u
+
+cd "$(git rev-parse --show-toplevel)"
+./deploy.sh || echo "!! Деплой не прошёл. Коммит на месте, запусти ./deploy.sh руками."

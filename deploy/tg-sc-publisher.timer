@@ -1,0 +1,15 @@
+[Unit]
+Description=Тик альбомного конвейера SoundCloud -> VK
+
+[Timer]
+# Тик каждые 15 минут — сам момент публикации хранится в БД (next_post_at,
+# случайный интервал 3-5 ч). Таймер лишь спрашивает «пора?», поэтому рандом
+# переживает рестарт сервера и не зависит от расписания systemd.
+OnBootSec=5min
+OnUnitActiveSec=15min
+# Пропущенные из-за выключенного сервера тики не копятся пачкой.
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

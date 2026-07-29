@@ -1,76 +1,148 @@
-# YouTube → VK Auto Publisher
+# SoundCloud → VK Auto Publisher
 
-**Статус:** 🟢 прод — задеплоен на VPS (`/opt/yt-vk-publisher`, systemd-таймер
-ежедневно 04:00 МСК). Live-проверено 2026-07-19: отложенный пост с видео создан
-в группе 240295467 (post_id=12, 18:00 МСК). 20 тестов зелёные.
+**Статус:** 🟢 прод (YouTube-поток) + 🟡 альбомный поток написан, на VPS не развёрнут.
+57 тестов зелёные. Каталог на VPS: `/opt/yt-vk-publisher`, в реестре бота — `p_minus`.
 
 ## Что это
 
-Скрипт-переносчик видео YouTube → сообщество ВК. Раз в сутки берёт N (по умолч. 3)
-неопубликованных ролика, скачивает через yt-dlp, грузит в ВК, ставит в отложенные
-записи, пишет YouTube ID в SQLite (дедуп), удаляет файлы. Без UI.
+Два независимых потока в одном проекте, публикуют в группу VK 240295467 «TG Music»:
 
-## Архитектура
+1. **YouTube → VK** (исходный, `main.py`) — берёт ролики из плейлистов YouTube Music.
+   **Выключен насовсем** решением владельца 2026-07-28: таймер `yt-vk-publisher.timer`
+   отключается, код и тесты оставлены рабочими.
+2. **SoundCloud → VK** (`soundcloud_cli.py`) — кидаешь боту ссылку на плейлист, он
+   скачивает треки с обложками, склеивает в один сборник, публикует его, а дальше
+   выкладывает треки по одному раз в 3–5 часов. Как закончит — пишет в Telegram.
+
+## Архитектура альбомного потока
 
 ```
-main.py → config.load_config → publisher.run_once
-  publisher: select_candidates (по каналам по порядку, dedup через Database)
-           → download_video (yt-dlp) → VKClient.upload_video → schedule_post
-           → Database.mark_published → cleanup файла
+бот Новостей (📦 Софты → 🎵 Загрузить плейлист)
+   └─ subprocess ─▶ soundcloud_cli.py enqueue <url>  → строка в albums (pending)
+tg-sc-publisher.timer (каждые 15 мин)
+   └─ soundcloud_cli.py tick → album_publisher.tick
+        альбом pending    → soundcloud.download_playlist → media.render/concat
+                          → vk.upload_video + schedule_post → status=publishing
+        альбом publishing → пора? не ночь? → один трек → next_post_at = +3..5 ч
+        треки кончились   → status=done → notifier.send «готово»
 ```
 
-Слои чистые: `vk_client`/`youtube` — границы внешних API (ловят Exception →
-свои VKError/YouTubeError). `publisher` — оркестрация. `database` — только SQLite.
-Чистая логика (`post_builder`, `schedule_planner`, `config._normalize_times`) —
-без сайд-эффектов, покрыта тестами.
+Момент следующей публикации лежит в БД (`albums.next_post_at`), а не в расписании
+systemd. Таймер только спрашивает «пора?» — поэтому случайный интервал переживает
+рестарт сервера, и нет двух источников правды о времени.
+
+| Модуль | Ответственность |
+|---|---|
+| `album_db.py` | очередь: albums / album_tracks / post_log. Единственное место с их SQL |
+| `soundcloud.py` | граница yt-dlp: плейлист → треки + обложки, дедуп обложек по хешу |
+| `media.py` | граница ffmpeg: обложка+аудио → mp4, concat склейка |
+| `album_scheduler.py` | чистая логика: случайный интервал + ночное окно |
+| `album_publisher.py` | оркестрация тика |
+| `notifier.py` | Telegram sendMessage (без поллинга) |
+| `soundcloud_cli.py` | enqueue / tick / status |
+
+`vk_client.py`, `publisher.py`, `youtube.py`, `database.py` — YouTube-поток, альбомным
+не затронуты.
 
 ## Быстрые команды
 
 ```bash
-venv/Scripts/python.exe -m pytest tests/ -q     # тесты
-python app/main.py                              # один прогон (cron)
-python app/main.py --schedule                   # постоянный процесс
+venv/Scripts/python.exe -m pytest tests/ -q       # 57 тестов
+python app/soundcloud_cli.py enqueue <url>        # поставить плейлист в очередь
+python app/soundcloud_cli.py tick                 # один шаг конвейера
+python app/soundcloud_cli.py status               # состояние очереди (JSON)
+python app/main.py                                # старый YouTube-прогон
 ```
 
 ## Токены VK (важно — анти-бан)
 
 Два токена по назначению, чтобы не палить user-токен частым постингом:
-- `VK_GROUP_TOKEN` (группа 240295467 «TG Music») — `wall.post` (отложенные записи).
-- `VK_USER_TOKEN` (админ, scope `video`) — ТОЛЬКО `video.save` (загрузка). VK не даёт
-  грузить видео групповым токеном: проверено вживую 2026-07-18 — `video.save`
-  групповым токеном → **`[5] User authorization failed`** (не `[27]`, как думали
-  по «Новостям», но суть та же — метод только user-контекста).
+- `VK_GROUP_TOKEN` (группа 240295467) — `wall.post` (отложенные записи).
+- `VK_USER_TOKEN` (админ, scope `video`) — ТОЛЬКО `video.save`. VK не даёт грузить
+  видео групповым токеном: проверено вживую 2026-07-18 — `video.save` групповым
+  токеном → **`[5] User authorization failed`**.
 
-Видео грузится В ГРУППУ (`video.save(group_id=...)`) → владелец вложения — сообщество,
-поэтому групповой токен корректно прикрепляет `video-GID_ID` к записи. User-токен
-дёргается 1 раз на ролик (3/день) — минимально, бан в «Новостях» был от 12 подряд
-постов user-токеном, а не от редких загрузок.
+Видео грузится В ГРУППУ (`video.save(group_id=...)`) → владелец вложения сообщество,
+поэтому групповой токен корректно прикрепляет `video-GID_ID` к записи.
+
+## Антибан альбомного потока
+
+| Параметр | Значение | Где |
+|---|---|---|
+| Ночная пауза | 23:00–09:00 МСК | `soundcloud.quiet_*_hour` |
+| Интервал | случайный 180–300 мин | `soundcloud.*_interval_minutes` |
+| Предохранитель | 5 постов/сутки | `soundcloud.max_posts_per_day` |
+| Возобновление утром | +0..45 мин джиттера | `album_scheduler` |
+
+Окно 14 ч при интервале 3–5 ч даёт 3–4 поста в сутки. Альбом на 20 треков расходится
+примерно за 6 дней. Суточный счётчик считает ВСЕ записи (сборник + треки) по таблице
+`post_log`, а не по трекам — иначе сборник проходил бы мимо лимита.
+
+## Оформление поста
+
+```
+🇸🇪 Big Baby Tape — Dragonborn (Album)     ← flag + артист — название (вид)
+
+00:00 1. Gimme the Loot                    ← только у сборника
+02:34 2. Bandana
+
+♾ Слушать в Telegram: <listen_url>         ← ведёт на бота
+📢 Канал: <channel_url>
+#big_baby_tape_dragonborn@tgmusic          ← уникален для трека И для альбома
+```
+
+Всё настраивается в `soundcloud.post` без правки кода. Два момента:
+
+- **`flag` ставится руками.** Страны артиста в метаданных SoundCloud нет — вывести
+  её автоматически неоткуда. Меняй под релиз или держи нейтральный эмодзи.
+- **`hashtag_template`** решает уникальность: `{artist}_{name}` даёт свой тег каждому
+  треку (20 треков = 20 тегов), `{artist}` — один общий на исполнителя.
+  `hashtag_group` — короткое имя сообщества VK, без него тег будет без «@».
 
 ## Инварианты
 
 - Секреты только в `.env`, никогда в config.yaml/коде.
 - Постинг — групповым токеном; user-токен — только загрузка видео.
-- Публикация только отложенная (`wall.post` с `publish_date`), не сразу.
-- Повторов нет: перед скачиванием `Database.should_skip`.
-- После успешной постановки — файл удаляется (на VPS роликов не остаётся).
+- Публикация только отложенная (`wall.post` с `publish_date`), не сразу. «Сейчас» =
+  `album_scheduler.soon()` = +3..12 мин: VK не принимает метку в прошлом.
+- Один альбом в работе за раз. Новая ссылка встаёт в очередь, не вклинивается.
+- После публикации трека его файлы удаляются; каталог альбома сносится на финише.
+
+## Пульт в боте Новостей
+
+Софт `p_minus` в реестре менеджера объявляет `config_json = {"soundcloud": true}` —
+по этому флагу в карточке появляются кнопки «🎵 Загрузить плейлист» и «📋 Очередь».
+Флаг ставит сид (`seed_default_softs` → `ensure_config_flag`), не затирая лимиты
+владельца в том же `config_json`.
+
+Бот вызывает CLI софта по `project_path` из реестра — кодом проекты не связаны,
+общий у них только формат вызова. Модуль-пульт: `NewsSoft/app/soundcloud_panel.py`.
 
 ## Грабли
 
-- `VkUpload.video(..., wallpost=0)` — именно `0` (int), не `False`: vk_api
-  сериализует Python `False` в строку `"False"`, VK её не парсит (урок «Новостей»).
-- yt-dlp нужен ffmpeg в PATH для склейки видео+аудио.
-- Точные ретраи +1ч/+3ч работают только в `--schedule`. В `--once` (cron)
+- `VkUpload.video(..., wallpost=0)` — именно `0` (int), не `False`: vk_api сериализует
+  Python `False` в строку `"False"`, VK её не парсит (урок «Новостей»).
+- yt-dlp нужен ffmpeg в PATH — и для извлечения mp3, и для склейки. На VPS 6.1.1, есть.
+- Шаблоны названий (`{name} — {artist} | {suffix}`) чистят осиротевшие разделители:
+  трек без автора даёт «Track | без цензуры», а не «Track —  | без цензуры».
+- Обложка копируется каждому треку в свой файл: треки публикуются днями и подчищают
+  файлы за собой — общий файл оставил бы соседа без арта.
+- Приватные и «секретные» ссылки SoundCloud не поддержаны (нужна авторизация).
+- Точные ретраи +1ч/+3ч YouTube-потока работают только в `--schedule`; в `--once`
   ролик с ошибкой берётся заново на следующем суточном прогоне.
 
 ## Деплой на VPS
 
 - Код: `/opt/yt-vk-publisher`, свой venv. `.env` + `config.yaml` — через scp (не в git).
-- Юниты: `yt-vk-publisher.service` (oneshot, `TZ=Europe/Moscow`) +
-  `yt-vk-publisher.timer` (`OnCalendar=*-*-* 04:00:00 Europe/Moscow`, `Persistent=true`).
-- Обновить код: `tar ... | ssh news-rewriter-vps "tar x -C /opt/yt-vk-publisher"`.
-- Ручной прогон: `ssh news-rewriter-vps "systemctl start yt-vk-publisher.service"`,
-  лог `/opt/yt-vk-publisher/logs/publisher.log`.
+- **Коммит = деплой**: `deploy.sh` + `.git/hooks/post-commit`. Хук не версионируется —
+  ставить заново на каждом новом клоне (см. `deploy/post-commit.sample`).
+- Разовая установка альбомного потока: `deploy/install.sh` НА СЕРВЕРЕ от root —
+  ставит юниты, включает `tg-sc-publisher.timer`, выключает `yt-vk-publisher.timer`.
+- Логи: `/opt/yt-vk-publisher/logs/publisher.log`, `journalctl -u tg-sc-publisher`.
 
 ## Осталось
 
-- Возможный gate на слишком большие видео (лимит размера ВК) — пока не встречалось.
+- Развернуть альбомный поток на VPS (нужны `TELEGRAM_BOT_TOKEN` и
+  `TELEGRAM_ADMIN_CHAT_ID` в `.env`, секция `soundcloud:` в прод-`config.yaml`).
+- Живая проверка на реальной ссылке SoundCloud — сквозной прогон ещё не делался.
+- Возможный gate на размер компиляции для очень длинных плейлистов (40+ треков).

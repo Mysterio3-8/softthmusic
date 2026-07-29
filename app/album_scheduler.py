@@ -1,0 +1,61 @@
+"""Когда публиковать следующий трек: случайный интервал + ночная пауза.
+
+Время везде наивное локальное (на VPS юниты стоят с TZ=Europe/Moscow) — так же,
+как в `schedule_planner`. Чистая логика без сайд-эффектов, `rng` передаётся
+параметром, чтобы тесты были детерминированными.
+"""
+from __future__ import annotations
+
+import random
+from datetime import datetime, timedelta
+
+# Разброс момента возобновления после ночной паузы. Без него каждый «утренний»
+# пост падал бы ровно в quiet_end — роботизированный тайминг, который и палит бота.
+_RESUME_JITTER_MINUTES = 45
+
+# Небольшой задел для «публикуем сейчас»: инвариант проекта — только отложенные
+# записи, а VK не принимает publish_date в прошлом. Заодно ещё немного рандома.
+_LEAD_MIN_MINUTES = 3
+_LEAD_MAX_MINUTES = 12
+
+
+def soon(now: datetime, rng: random.Random | None = None) -> datetime:
+    """Ближайший момент для отложенной записи «прямо сейчас»."""
+    rng = rng or random.Random()
+    delay = rng.randint(_LEAD_MIN_MINUTES, _LEAD_MAX_MINUTES)
+    return (now + timedelta(minutes=delay)).replace(second=0, microsecond=0)
+
+
+def is_quiet_hour(moment: datetime, quiet_start_hour: int, quiet_end_hour: int) -> bool:
+    """Попадает ли момент в ночное окно. Окно может пересекать полночь (23..9)."""
+    if quiet_start_hour == quiet_end_hour:
+        return False  # окно нулевой длины = пауза выключена
+    hour = moment.hour
+    if quiet_start_hour < quiet_end_hour:
+        return quiet_start_hour <= hour < quiet_end_hour
+    return hour >= quiet_start_hour or hour < quiet_end_hour
+
+
+def next_publish_moment(
+    now: datetime,
+    min_interval_minutes: int,
+    max_interval_minutes: int,
+    quiet_start_hour: int,
+    quiet_end_hour: int,
+    rng: random.Random | None = None,
+) -> datetime:
+    """Момент следующей публикации: now + случайный интервал, сдвинутый из ночи."""
+    rng = rng or random.Random()
+    delay = rng.randint(min_interval_minutes, max_interval_minutes)
+    candidate = (now + timedelta(minutes=delay)).replace(second=0, microsecond=0)
+    if not is_quiet_hour(candidate, quiet_start_hour, quiet_end_hour):
+        return candidate
+    return _resume_after_quiet(candidate, quiet_end_hour, rng)
+
+
+def _resume_after_quiet(moment: datetime, quiet_end_hour: int, rng: random.Random) -> datetime:
+    """Переносит момент на конец ночного окна плюс случайные минуты."""
+    resume = moment.replace(hour=quiet_end_hour, minute=0, second=0, microsecond=0)
+    if resume <= moment:
+        resume += timedelta(days=1)
+    return resume + timedelta(minutes=rng.randint(0, _RESUME_JITTER_MINUTES))

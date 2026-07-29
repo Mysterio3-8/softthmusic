@@ -1,0 +1,15 @@
+[Unit]
+Description=SoundCloud -> VK: один шаг альбомного конвейера
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/yt-vk-publisher
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/yt-vk-publisher/venv/bin/python app/soundcloud_cli.py tick
+# Скачивание плейлиста и склейка десятка треков — минуты, не секунды.
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

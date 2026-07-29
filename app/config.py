@@ -12,6 +12,40 @@ class ConfigError(Exception):
     """Проблема в конфигурации или отсутствие обязательного секрета."""
 
 
+@dataclass(frozen=True)
+class PostStyle:
+    """Оформление поста-релиза.
+
+    flag задаётся вручную: страны артиста в метаданных SoundCloud нет, вывести
+    её автоматически неоткуда — это осознанно настройка, а не пропущенная фича.
+    """
+
+    flag: str
+    listen_url: str
+    channel_url: str
+    hashtag_template: str
+    hashtag_group: str
+    track_kind: str
+    album_kind: str
+
+
+@dataclass(frozen=True)
+class SoundCloudConfig:
+    """Настройки альбомного потока. Антибан-имена совпадают с контрактом менеджера."""
+
+    min_interval_minutes: int
+    max_interval_minutes: int
+    quiet_start_hour: int
+    quiet_end_hour: int
+    max_posts_per_day: int
+    album_title_template: str
+    track_title_template: str
+    censorship_suffix: str
+    max_track_attempts: int
+    work_dir: Path
+    post: PostStyle
+
+
 @dataclass
 class Config:
     vk_group_token: str
@@ -27,6 +61,11 @@ class Config:
     database_path: Path
     downloads_dir: Path
     log_path: Path
+    # Альбомный поток необязателен: без секции soundcloud: и Telegram-переменных
+    # проект остаётся чистым YouTube-паблишером.
+    soundcloud: SoundCloudConfig = field(default_factory=lambda: _build_soundcloud({}))
+    telegram_bot_token: str = ""
+    telegram_admin_chat_id: int | None = None
 
     @property
     def owner_id(self) -> int:
@@ -56,10 +95,20 @@ def load_config(config_path: str | Path = "config.yaml", env_path: str | Path = 
         raise ConfigError(f"Файл конфигурации не найден: {path}")
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return _build_config(raw, group_token, user_token)
+    return _build_config(raw, group_token, user_token, _telegram_env())
 
 
-def _build_config(raw: dict, group_token: str, user_token: str) -> Config:
+def _telegram_env() -> tuple[str, int | None]:
+    """Токен и chat_id для уведомлений. Пусто — уведомления просто не шлются."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    raw_chat_id = os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").strip()
+    chat_id = int(raw_chat_id) if raw_chat_id.lstrip("-").isdigit() else None
+    return token, chat_id
+
+
+def _build_config(
+    raw: dict, group_token: str, user_token: str, telegram: tuple[str, int | None] = ("", None)
+) -> Config:
     vk = raw.get("vk") or {}
     youtube = raw.get("youtube") or {}
     publishing = raw.get("publishing") or {}
@@ -101,6 +150,51 @@ def _build_config(raw: dict, group_token: str, user_token: str) -> Config:
         database_path=Path(paths.get("database", "data/publisher.db")),
         downloads_dir=Path(paths.get("downloads", "downloads")),
         log_path=Path(paths.get("logs", "logs/publisher.log")),
+        soundcloud=_build_soundcloud(raw.get("soundcloud") or {}),
+        telegram_bot_token=telegram[0],
+        telegram_admin_chat_id=telegram[1],
+    )
+
+
+def _build_soundcloud(raw: dict) -> SoundCloudConfig:
+    min_interval = int(raw.get("min_interval_minutes", 180))
+    max_interval = int(raw.get("max_interval_minutes", 300))
+    if min_interval > max_interval:
+        raise ConfigError(
+            "soundcloud.min_interval_minutes больше max_interval_minutes — "
+            "случайный интервал не построить"
+        )
+
+    quiet_start = int(raw.get("quiet_start_hour", 23))
+    quiet_end = int(raw.get("quiet_end_hour", 9))
+    for name, hour in (("quiet_start_hour", quiet_start), ("quiet_end_hour", quiet_end)):
+        if not 0 <= hour <= 23:
+            raise ConfigError(f"soundcloud.{name} должен быть в диапазоне 0..23")
+
+    return SoundCloudConfig(
+        min_interval_minutes=min_interval,
+        max_interval_minutes=max_interval,
+        quiet_start_hour=quiet_start,
+        quiet_end_hour=quiet_end,
+        max_posts_per_day=int(raw.get("max_posts_per_day", 5)),
+        album_title_template=str(raw.get("album_title_template", "{name} — {artist} | {suffix}")),
+        track_title_template=str(raw.get("track_title_template", "{name} — {artist} | {suffix}")),
+        censorship_suffix=str(raw.get("censorship_suffix", "без цензуры")),
+        max_track_attempts=int(raw.get("max_track_attempts", 3)),
+        work_dir=Path(raw.get("work_dir", "downloads/soundcloud")),
+        post=_build_post_style(raw.get("post") or {}),
+    )
+
+
+def _build_post_style(raw: dict) -> PostStyle:
+    return PostStyle(
+        flag=str(raw.get("flag", "🎧")),
+        listen_url=str(raw.get("listen_url", "")),
+        channel_url=str(raw.get("channel_url", "")),
+        hashtag_template=str(raw.get("hashtag_template", "{artist}_{name}")),
+        hashtag_group=str(raw.get("hashtag_group", "")),
+        track_kind=str(raw.get("track_kind", "Single")),
+        album_kind=str(raw.get("album_kind", "Album")),
     )
 
 
