@@ -109,8 +109,13 @@ class AlbumQueue:
         self._conn.commit()
 
     def posts_since(self, moment: datetime) -> int:
+        """created_at хранится в UTC — границу приводим туда же.
+
+        Сравнение идёт строками, поэтому смешивать смещения нельзя: «+03:00» и
+        «+00:00» лексикографически сравниваются по цифрам, а не по моменту времени.
+        """
         row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM post_log WHERE created_at >= ?", (moment.isoformat(),)
+            "SELECT COUNT(*) AS n FROM post_log WHERE created_at >= ?", (_to_utc_iso(moment),)
         ).fetchone()
         return int(row["n"])
 
@@ -239,6 +244,12 @@ class AlbumQueue:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _to_utc_iso(moment: datetime) -> str:
+    """Наивный момент считаем местным (МСК на проде), аware — переводим в UTC."""
+    aware = moment if moment.tzinfo else moment.astimezone()
+    return aware.astimezone(timezone.utc).isoformat()
 
 
 def _to_album(row: sqlite3.Row) -> AlbumRow:

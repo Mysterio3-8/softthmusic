@@ -1,7 +1,7 @@
 import random
 from datetime import datetime
 
-from app.album_scheduler import is_quiet_hour, next_publish_moment, soon
+from app.album_scheduler import MOSCOW, is_quiet_hour, next_publish_moment, soon
 
 QUIET_START = 23
 QUIET_END = 9
@@ -24,7 +24,7 @@ def test_equal_hours_disable_quiet_window():
 
 
 def test_interval_stays_within_configured_bounds():
-    now = datetime(2026, 7, 28, 12, 0)
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=MOSCOW)
 
     for seed in range(50):
         moment = next_publish_moment(now, 180, 300, QUIET_START, QUIET_END, random.Random(seed))
@@ -55,9 +55,50 @@ def test_morning_resume_is_jittered_not_exactly_at_quiet_end():
 
 
 def test_soon_is_in_the_future_and_rounded():
-    now = datetime(2026, 7, 28, 12, 0, 37)
+    now = datetime(2026, 7, 28, 12, 0, 37, tzinfo=MOSCOW)
 
     moment = soon(now, random.Random(0))
 
     assert moment > now
     assert moment.second == 0
+
+
+def test_naive_input_is_read_as_moscow_not_as_process_timezone():
+    """CLI, запущенный руками на UTC-сервере, не должен сдвигать расписание."""
+    moment = soon(datetime(2026, 7, 28, 12, 0), random.Random(0))
+
+    assert moment.tzinfo is not None
+    assert moment.hour == 12  # 12:0x МСК, а не 15:0x
+
+
+def test_night_window_is_measured_in_moscow_not_process_timezone():
+    """Тик из systemd идёт в МСК, а руками по SSH — в UTC сервера. Окно обязано
+    считаться одинаково: иначе ночная пауза разъезжается на 3 часа."""
+    from datetime import timezone
+    from app.album_scheduler import MOSCOW
+
+    # Один и тот же момент: 02:00 МСК = 23:00 UTC предыдущих суток.
+    msk = datetime(2026, 7, 29, 2, 0, tzinfo=MOSCOW)
+    utc = msk.astimezone(timezone.utc)
+
+    assert is_quiet_hour(msk, QUIET_START, QUIET_END)
+    assert is_quiet_hour(utc, QUIET_START, QUIET_END)
+
+
+def test_daytime_moment_is_not_quiet_in_either_representation():
+    from datetime import timezone
+    from app.album_scheduler import MOSCOW
+
+    msk = datetime(2026, 7, 29, 15, 0, tzinfo=MOSCOW)
+
+    assert not is_quiet_hour(msk, QUIET_START, QUIET_END)
+    assert not is_quiet_hour(msk.astimezone(timezone.utc), QUIET_START, QUIET_END)
+
+
+def test_next_moment_is_moscow_aware():
+    from app.album_scheduler import MOSCOW, now_msk
+
+    moment = next_publish_moment(now_msk(), 180, 300, QUIET_START, QUIET_END, random.Random(0))
+
+    assert moment.tzinfo is not None
+    assert moment.utcoffset() == MOSCOW.utcoffset(moment.replace(tzinfo=None))

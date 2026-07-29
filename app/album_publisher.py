@@ -18,7 +18,7 @@ from app.album_db import (
     AlbumQueue,
     AlbumRow,
 )
-from app.album_scheduler import is_quiet_hour, next_publish_moment, soon
+from app.album_scheduler import is_quiet_hour, next_publish_moment, now_msk, soon, to_msk
 from app.config import Config
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
@@ -37,7 +37,7 @@ _MISSING_COVER_MESSAGE = "У треков нет ни одной обложки 
 def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
          now: datetime | None = None) -> str:
     """Один шаг конвейера. Возвращает короткое описание сделанного (для логов и CLI)."""
-    now = now or datetime.now()
+    now = to_msk(now) if now else now_msk()
     settings = config.soundcloud
 
     if _daily_limit_reached(queue, settings.max_posts_per_day, now):
@@ -179,8 +179,8 @@ def _continue_album(
     """Публикует один трек, если наступило время и не идёт ночная пауза."""
     settings = config.soundcloud
 
-    if album.next_post_at and now < album.next_post_at:
-        return f"рано: следующий трек в {album.next_post_at:%d.%m %H:%M}"
+    if album.next_post_at and now < to_msk(album.next_post_at):
+        return f"рано: следующий трек в {to_msk(album.next_post_at):%d.%m %H:%M}"
     if is_quiet_hour(now, settings.quiet_start_hour, settings.quiet_end_hour):
         return "ночная пауза"
 

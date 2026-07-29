@@ -109,3 +109,20 @@ def test_post_log_counts_only_recent_posts(queue):
     now = datetime.now(timezone.utc)
     assert queue.posts_since(now - timedelta(days=1)) == 2
     assert queue.posts_since(now + timedelta(minutes=1)) == 0
+
+
+def test_daily_counter_compares_instants_not_iso_strings(queue):
+    """Граница приходит в МСК, а post_log пишет UTC. Наивное строковое сравнение
+    ISO с разными смещениями врёт — счётчик обязан сравнивать моменты."""
+    from zoneinfo import ZoneInfo
+
+    queue.log_post("album")
+    moscow = ZoneInfo("Europe/Moscow")
+
+    # Граница на сутки назад, выраженная в МСК: пост записан только что,
+    # значит обязан попасть в окно независимо от смещения границы.
+    boundary = datetime.now(moscow) - timedelta(days=1)
+    assert queue.posts_since(boundary) == 1
+
+    # Граница в будущем — пост в окно не попадает.
+    assert queue.posts_since(datetime.now(moscow) + timedelta(hours=1)) == 0

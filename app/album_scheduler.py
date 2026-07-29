@@ -1,13 +1,31 @@
 """Когда публиковать следующий трек: случайный интервал + ночная пауза.
 
-Время везде наивное локальное (на VPS юниты стоят с TZ=Europe/Moscow) — так же,
-как в `schedule_planner`. Чистая логика без сайд-эффектов, `rng` передаётся
-параметром, чтобы тесты были детерминированными.
+Время — МСК и всегда с зоной. Опираться на локальную зону процесса нельзя:
+systemd-юнит стоит с TZ=Europe/Moscow, а тот же CLI, запущенный руками по SSH,
+получит UTC сервера — ночное окно и next_post_at разъехались бы на 3 часа
+(поймано на первом живом прогоне 2026-07-29).
+
+Чистая логика без сайд-эффектов, `rng` параметром — ради детерминированных тестов.
 """
 from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+MOSCOW = ZoneInfo("Europe/Moscow")
+
+
+def now_msk() -> datetime:
+    """Текущий момент в МСК, независимо от TZ процесса."""
+    return datetime.now(MOSCOW)
+
+
+def to_msk(moment: datetime) -> datetime:
+    """Приводит момент к МСК. Наивный считаем уже московским."""
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=MOSCOW)
+    return moment.astimezone(MOSCOW)
 
 # Разброс момента возобновления после ночной паузы. Без него каждый «утренний»
 # пост падал бы ровно в quiet_end — роботизированный тайминг, который и палит бота.
@@ -23,14 +41,14 @@ def soon(now: datetime, rng: random.Random | None = None) -> datetime:
     """Ближайший момент для отложенной записи «прямо сейчас»."""
     rng = rng or random.Random()
     delay = rng.randint(_LEAD_MIN_MINUTES, _LEAD_MAX_MINUTES)
-    return (now + timedelta(minutes=delay)).replace(second=0, microsecond=0)
+    return (to_msk(now) + timedelta(minutes=delay)).replace(second=0, microsecond=0)
 
 
 def is_quiet_hour(moment: datetime, quiet_start_hour: int, quiet_end_hour: int) -> bool:
     """Попадает ли момент в ночное окно. Окно может пересекать полночь (23..9)."""
     if quiet_start_hour == quiet_end_hour:
         return False  # окно нулевой длины = пауза выключена
-    hour = moment.hour
+    hour = to_msk(moment).hour
     if quiet_start_hour < quiet_end_hour:
         return quiet_start_hour <= hour < quiet_end_hour
     return hour >= quiet_start_hour or hour < quiet_end_hour
@@ -47,7 +65,7 @@ def next_publish_moment(
     """Момент следующей публикации: now + случайный интервал, сдвинутый из ночи."""
     rng = rng or random.Random()
     delay = rng.randint(min_interval_minutes, max_interval_minutes)
-    candidate = (now + timedelta(minutes=delay)).replace(second=0, microsecond=0)
+    candidate = (to_msk(now) + timedelta(minutes=delay)).replace(second=0, microsecond=0)
     if not is_quiet_hour(candidate, quiet_start_hour, quiet_end_hour):
         return candidate
     return _resume_after_quiet(candidate, quiet_end_hour, rng)
