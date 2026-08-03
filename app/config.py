@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from app.vk_token_pool import DEFAULT_DAILY_CAP, MIN_GAP_MINUTES
+
 
 class ConfigError(Exception):
     """Проблема в конфигурации или отсутствие обязательного секрета."""
@@ -61,6 +63,11 @@ class Config:
     database_path: Path
     downloads_dir: Path
     log_path: Path
+    # Имена переменных общего пула личных токенов; пусто → один свой VK_USER_TOKEN
+    # (значения по умолчанию нужны, чтобы старые вызовы Config(...) не ломались).
+    vk_upload_token_envs: list[str] = field(default_factory=list)
+    vk_token_daily_cap: int = DEFAULT_DAILY_CAP
+    vk_token_min_gap_minutes: int = MIN_GAP_MINUTES
     # Альбомный поток необязателен: без секции soundcloud: и Telegram-переменных
     # проект остаётся чистым YouTube-паблишером.
     soundcloud: SoundCloudConfig = field(default_factory=lambda: _build_soundcloud({}))
@@ -119,6 +126,10 @@ def _build_config(
     if not isinstance(group_id, int) or group_id <= 0:
         raise ConfigError("vk.group_id должен быть положительным числом")
 
+    upload_token_envs = [str(name) for name in (vk.get("upload_token_envs") or [])]
+    token_daily_cap = int(vk.get("token_daily_cap", DEFAULT_DAILY_CAP))
+    token_min_gap = int(vk.get("token_min_gap_minutes", MIN_GAP_MINUTES))
+
     channels = [c.strip() for c in (youtube.get("channels") or []) if str(c).strip()]
     if not channels:
         raise ConfigError("youtube.channels пуст — укажите хотя бы один канал")
@@ -140,6 +151,9 @@ def _build_config(
         vk_group_token=group_token,
         vk_user_token=user_token,
         group_id=group_id,
+        vk_upload_token_envs=upload_token_envs,
+        vk_token_daily_cap=token_daily_cap,
+        vk_token_min_gap_minutes=token_min_gap,
         channels=channels,
         max_height=int(youtube.get("max_height", 480)),
         posts_per_day=posts_per_day,

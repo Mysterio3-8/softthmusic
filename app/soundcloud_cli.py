@@ -23,7 +23,7 @@ from app.config import Config, ConfigError, load_config  # noqa: E402
 from app.logger import get_logger, setup_logging  # noqa: E402
 from app.notifier import Notifier  # noqa: E402
 from app.soundcloud import SoundCloudError, fetch_playlist_meta  # noqa: E402
-from app.vk_client import VKClient  # noqa: E402
+from app.vk_client import VKClient, build_token_pool  # noqa: E402
 
 _SOUNDCLOUD_HOSTS = ("soundcloud.com", "on.soundcloud.com", "m.soundcloud.com")
 
@@ -110,7 +110,10 @@ def _cmd_status(queue: AlbumQueue) -> int:
 
 def _cmd_tick(config: Config, queue: AlbumQueue) -> int:
     log = get_logger()
-    vk = VKClient(config.vk_group_token, config.vk_user_token, config.group_id)
+    vk = VKClient(
+        config.vk_group_token, config.vk_user_token, config.group_id,
+        token_pool=build_token_pool(config),
+    )
     notifier = Notifier(config.telegram_bot_token, config.telegram_admin_chat_id)
     try:
         outcome = tick(config, queue, vk, notifier)

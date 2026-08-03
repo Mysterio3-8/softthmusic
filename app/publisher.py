@@ -9,7 +9,7 @@ from app.database import Database
 from app.logger import get_logger
 from app.post_builder import build_post_text, clean_description
 from app.schedule_planner import compute_publish_datetimes
-from app.vk_client import VKClient, VKError
+from app.vk_client import VKClient, build_token_pool, VKError
 from app.youtube import VideoMeta, YouTubeError, download_video, list_channel_video_ids
 
 
@@ -50,7 +50,10 @@ def run_once(config: Config, db: Database, now: datetime | None = None) -> int:
     log = get_logger()
     log.info("=== Запуск подготовки публикаций ===")
 
-    vk = VKClient(config.vk_group_token, config.vk_user_token, config.group_id)
+    vk = VKClient(
+        config.vk_group_token, config.vk_user_token, config.group_id,
+        token_pool=build_token_pool(config),
+    )
     # Один запуск = posts_per_run роликов (по умолч. 1), каждый на ближайший
     # свободный слот. Джоб запускается несколько раз в день (см. systemd-таймер),
     # поэтому видео грузятся по одному, а не пачкой.

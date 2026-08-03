@@ -6,10 +6,32 @@ from pathlib import Path
 import vk_api
 
 from app.logger import get_logger
+from app.vk_token_pool import TokenLease, VkTokenPool, token_hash
+
+# Коды VK, означающие проблему с самим аккаунтом, а не с запросом: аккаунт нужно
+# выводить из ротации надолго, а не на обычные 90 минут.
+BAN_CODES = (5, 17, 29)
 
 
 class VKError(Exception):
     """Ошибка загрузки видео или создания отложенной записи в VK."""
+
+
+def _looks_like_ban(exc: Exception) -> bool:
+    code = getattr(exc, "code", None)
+    return code in BAN_CODES
+
+
+def build_token_pool(config) -> VkTokenPool | None:
+    """Пул личных токенов из конфига софта. Пул не настроен → None, и клиент работает
+    по-старому, одним VK_USER_TOKEN."""
+    if not config.vk_upload_token_envs:
+        return None
+    return VkTokenPool(
+        config.vk_upload_token_envs,
+        daily_cap=config.vk_token_daily_cap,
+        min_gap_minutes=config.vk_token_min_gap_minutes,
+    )
 
 
 class VKClient:
@@ -24,18 +46,42 @@ class VKClient:
     сообщество, и групповой токен корректно прикрепляет его к записи на стене.
     """
 
-    def __init__(self, group_token: str, user_token: str, group_id: int) -> None:
+    def __init__(
+        self,
+        group_token: str,
+        user_token: str,
+        group_id: int,
+        token_pool: VkTokenPool | None = None,
+    ) -> None:
         self._group_id = group_id
         self._group_api = vk_api.VkApi(token=group_token).get_api()
 
         user_session = vk_api.VkApi(token=user_token)
         self._user_api = user_session.get_api()
-        self._upload = vk_api.VkUpload(user_session)
+        self._user_token = user_token
+        self._token_pool = token_pool
+
+    def _lease_upload_token(self) -> TokenLease:
+        """Аккаунт для загрузки очередного ролика. Пул общий на весь сервер, поэтому
+        нагрузка делится с Новостями, Кино и Минусами (SPEC_TOKEN_BALANCER.md).
+        Пул не задан → прежнее поведение, свой VK_USER_TOKEN."""
+        if self._token_pool is None:
+            return TokenLease("VK_USER_TOKEN", self._user_token, f"h:{token_hash(self._user_token)}")
+        lease = self._token_pool.pick()
+        if lease is None:
+            raise VKError("Все аккаунты пула выбрали суточный лимит загрузок — публикация отложена")
+        return lease
 
     def upload_video(self, file_path: Path, name: str, description: str) -> str:
-        """Загружает видео В ГРУППУ user-токеном. Возвращает attachment video-GID_ID."""
+        """Загружает видео В ГРУППУ user-токеном. Возвращает attachment video-GID_ID.
+
+        Сессия загрузки строится на КАЖДЫЙ ролик, а не один раз в конструкторе: иначе
+        балансер выбрал бы аккаунт единожды за запуск процесса и весь суточный объём
+        ушёл бы на него — ровно это и приводит к бану."""
+        lease = self._lease_upload_token()
+        upload = vk_api.VkUpload(vk_api.VkApi(token=lease.token))
         try:
-            saved = self._upload.video(
+            saved = upload.video(
                 video_file=str(file_path),
                 name=name[:128] or "video",
                 description=description,
@@ -43,6 +89,8 @@ class VKClient:
                 wallpost=0,
             )
         except Exception as exc:  # noqa: BLE001 — граница внешнего API
+            if self._token_pool is not None:
+                self._token_pool.record_error(lease, blocked=_looks_like_ban(exc))
             raise VKError(f"Не удалось загрузить видео в VK: {exc}") from exc
 
         owner_id = saved.get("owner_id")
