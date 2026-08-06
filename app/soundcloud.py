@@ -36,8 +36,77 @@ class Track:
     cover_path: Path | None
 
 
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+_ASSET_PREFIX = "https://a-v2.sndcdn.com/assets/"
+_CLIENT_ID_MIN_LEN = 30
+
+
+def _scrape_client_id(page_url: str) -> str | None:
+    """Достать client_id из JS-бандлов страницы SoundCloud.
+
+    Ключ лежит в скриптах, на которые ссылается ЛЮБАЯ страница артиста или трека, —
+    а они с этого сервера открываются нормально (200), в отличие от главной."""
+    import requests
+
+    headers = {"User-Agent": _BROWSER_UA}
+    try:
+        page = requests.get(page_url, headers=headers, timeout=30).text
+    except Exception as exc:  # noqa: BLE001 — граница сети
+        get_logger().warning("client_id: страница %s недоступна: %s", page_url, exc)
+        return None
+
+    assets = []
+    for chunk in page.split(_ASSET_PREFIX)[1:]:
+        end = chunk.find(".js")
+        if end > 0:
+            assets.append(_ASSET_PREFIX + chunk[: end + 3])
+
+    # Ключ обычно в последних бандлах — идём с конца, чтобы не качать лишнее.
+    for asset_url in reversed(assets):
+        try:
+            script = requests.get(asset_url, headers=headers, timeout=30).text
+        except Exception:  # noqa: BLE001 — один битый бандл не повод сдаваться
+            continue
+        marker = 'client_id:"'
+        start = script.find(marker)
+        while start != -1:
+            value_start = start + len(marker)
+            value_end = script.find('"', value_start)
+            candidate = script[value_start:value_end]
+            if len(candidate) >= _CLIENT_ID_MIN_LEN:
+                return candidate
+            start = script.find(marker, start + 1)
+    return None
+
+
+def ensure_client_id(sample_url: str) -> None:
+    """Положить рабочий client_id в кеш yt-dlp, если его там нет.
+
+    Зачем это вообще: yt-dlp добывает client_id только с главной `soundcloud.com/`,
+    а она отдаёт этому серверу **403** (страницы треков при этом открываются, 200 —
+    то есть IP не в бане, блокируется именно главная). Без ключа падает КАЖДЫЙ трек,
+    и альбом целиком помечается «ни один трек не скачался» — ровно эта поломка
+    остановила публикации 2026-08-05.
+
+    Самолечение бесплатно: получив 401/403, yt-dlp сам обнуляет ключ в кеше, поэтому
+    следующий вызов увидит пустой кеш и добудет свежий."""
+    ydl = yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True})
+    if ydl.cache.load("soundcloud", "client_id"):
+        return
+    client_id = _scrape_client_id(sample_url)
+    if not client_id:
+        get_logger().warning("client_id: не удалось добыть — скачивание, вероятно, упадёт")
+        return
+    ydl.cache.store("soundcloud", "client_id", client_id)
+    get_logger().info("client_id обновлён (%s...)", client_id[:6])
+
+
 def fetch_playlist_meta(url: str) -> PlaylistMeta:
     """Название, автор и число треков без скачивания. Дёргается ботом на enqueue."""
+    ensure_client_id(url)
     options = {
         "extract_flat": True,
         "skip_download": True,
@@ -66,6 +135,7 @@ def fetch_playlist_meta(url: str) -> PlaylistMeta:
 
 def download_playlist(url: str, target_dir: Path) -> list[Track]:
     """Скачивает все треки плейлиста в mp3 с обложками. Порядок — как в плейлисте."""
+    ensure_client_id(url)
     target_dir.mkdir(parents=True, exist_ok=True)
     options = {
         "format": "bestaudio/best",
