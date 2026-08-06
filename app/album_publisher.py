@@ -14,6 +14,7 @@ from app.album_db import (
     ALBUM_DONE,
     ALBUM_DOWNLOADING,
     ALBUM_FAILED,
+    ALBUM_PENDING,
     ALBUM_PUBLISHING,
     AlbumQueue,
     AlbumRow,
@@ -25,7 +26,7 @@ from app.media import MediaError, concat_videos, render_track_video
 from app.notifier import Notifier
 from app.post_builder import build_release_header, build_release_text, build_tracklist
 from app.soundcloud import SoundCloudError, Track, covers_are_identical, download_playlist
-from app.vk_client import VKClient, VKError
+from app.vk_client import VKClient, VKError, VKTokenBusy
 
 POST_KIND_ALBUM = "album"
 POST_KIND_TRACK = "track"
@@ -98,6 +99,13 @@ def _start_album(
             album.chat_id,
         )
         return f"опубликован сборник альбома {album.id}, треков {len(tracks)}"
+    except VKTokenBusy as exc:
+        # НЕ поломка: свободного токена нет прямо сейчас. Альбом возвращается в очередь
+        # вместе с уже скачанными и отрендеренными файлами — иначе занятый пул (штатное
+        # состояние, пока рабочий аккаунт один) сжигал бы всю работу тика впустую.
+        log.warning("Альбом %s отложен: %s", album.id, exc)
+        queue.set_album_status(album.id, ALBUM_PENDING)
+        return f"альбом {album.id} отложен (нет свободного токена)"
     except (SoundCloudError, MediaError, VKError) as exc:
         log.error("Альбом %s провалился: %s", album.id, exc)
         queue.set_album_status(album.id, ALBUM_FAILED, str(exc))

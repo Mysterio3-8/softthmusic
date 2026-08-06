@@ -13,6 +13,16 @@ from app.vk_token_pool import TokenLease, VkTokenPool, token_hash
 BAN_CODES = (5, 17, 29)
 
 
+class VKTokenBusy(Exception):
+    """Свободного личного токена нет ПРЯМО СЕЙЧАС — это не поломка, а «зайди позже».
+
+    Отдельный тип нужен, чтобы вызывающий не хоронил альбом: пул общий на весь сервер,
+    и зазор между загрузками одного аккаунта — штатное состояние, особенно после бана
+    второго аккаунта (2026-08-05), когда рабочий остался один. Раньше это ловилось как
+    обычная VKError, альбом помечался failed и терял 14 уже скачанных и отрендеренных
+    треков."""
+
+
 class VKError(Exception):
     """Ошибка загрузки видео или создания отложенной записи в VK."""
 
@@ -69,7 +79,10 @@ class VKClient:
             return TokenLease("VK_USER_TOKEN", self._user_token, f"h:{token_hash(self._user_token)}")
         lease = self._token_pool.pick()
         if lease is None:
-            raise VKError("Все аккаунты пула выбрали суточный лимит загрузок — публикация отложена")
+            raise VKTokenBusy(
+                "Свободного личного токена нет (зазор между загрузками или суточный кап) "
+                "— публикация отложена до следующего тика"
+            )
         return lease
 
     def upload_video(self, file_path: Path, name: str, description: str) -> str:

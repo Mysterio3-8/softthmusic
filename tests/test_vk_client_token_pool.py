@@ -8,7 +8,7 @@ import pytest
 import vk_api
 
 from app import vk_token_pool
-from app.vk_client import VKClient, VKError
+from app.vk_client import VKClient, VKTokenBusy
 from app.vk_token_pool import VkTokenPool
 
 
@@ -82,7 +82,7 @@ def test_exhausted_pool_refuses_to_upload(monkeypatch):
     client.upload_video(Path("x.mp4"), "name", "desc")
     client.upload_video(Path("x.mp4"), "name", "desc")
 
-    with pytest.raises(VKError, match="суточный лимит"):
+    with pytest.raises(VKTokenBusy):
         client.upload_video(Path("x.mp4"), "name", "desc")
 
 
@@ -93,7 +93,7 @@ def test_min_gap_prevents_two_uploads_in_a_row_on_one_account(monkeypatch):
     client.upload_video(Path("x.mp4"), "name", "desc")
     client.upload_video(Path("x.mp4"), "name", "desc")
 
-    with pytest.raises(VKError):
+    with pytest.raises(VKTokenBusy):
         client.upload_video(Path("x.mp4"), "name", "desc")
 
     assert sorted(_FakeUpload.used_tokens) == ["shared-1", "shared-2"]
