@@ -181,11 +181,16 @@ def _collect_tracks(entries: list, target_dir: Path) -> list[Track]:
     """Сопоставляет записи yt-dlp со скачанными файлами. Несошедшиеся — пропускает."""
     tracks: list[Track] = []
     position = 0
-    for entry in entries:
+    for order, entry in enumerate(entries, start=1):
         if not entry:
             continue  # ignoreerrors=True даёт None на упавших треках
         position += 1
-        stem = f"{position:03d} - {entry.get('id')}"
+        # Имя файла даёт yt-dlp по playlist_index — это номер среди ВСЕХ записей, включая
+        # упавшие. Локальный счётчик считает только успешные, поэтому любой пропущенный
+        # трек (а DRM-треки их создают регулярно) сдвигал нумерацию, и дальше не находился
+        # НИ ОДИН файл: альбом падал с «Ни один трек не скачался» при реально скачанных mp3.
+        index = entry.get("playlist_index") or order
+        stem = f"{index:03d} - {entry.get('id')}"
         audio_path = target_dir / f"{stem}.mp3"
         if not audio_path.exists():
             get_logger().warning("Трек %s не скачался, пропуск", entry.get("title"))
