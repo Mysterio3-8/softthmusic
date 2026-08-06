@@ -43,6 +43,16 @@ _BROWSER_UA = (
 _ASSET_PREFIX = "https://a-v2.sndcdn.com/assets/"
 _CLIENT_ID_MIN_LEN = 30
 
+MAX_TRACKS_PER_ALBUM = 30
+"""Сколько треков берём с одной ссылки.
+
+Ссылка вида `/tracks` у плодовитого артиста отдаёт сотни треков (у kizaru — 358), а тик
+качает плейлист ЦЕЛИКОМ, рендерит видео на каждый трек и склеивает всё в один сборник.
+На этом VPS (1 ядро, 961 МБ RAM, ~8 ГБ свободно) это не проходит ни по диску, ни по
+времени, а сборник из 358 треков — это ~20 часов видео, которые никто не смотрит.
+Потолок режет ссылку до размера обычного альбома; хотите продолжение — ставьте ту же
+ссылку в очередь повторно."""
+
 
 def _scrape_client_id(page_url: str) -> str | None:
     """Достать client_id из JS-бандлов страницы SoundCloud.
@@ -112,6 +122,7 @@ def fetch_playlist_meta(url: str) -> PlaylistMeta:
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
+        "playlistend": MAX_TRACKS_PER_ALBUM,
     }
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
@@ -144,6 +155,7 @@ def download_playlist(url: str, target_dir: Path) -> list[Track]:
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": True,
+        "playlistend": MAX_TRACKS_PER_ALBUM,
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
         ],
