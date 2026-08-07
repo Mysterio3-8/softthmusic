@@ -201,6 +201,14 @@ def _continue_album(
     if track is None:
         return _finish_album(config, queue, notifier, album)
 
+    # Токен проверяется ДО всякой работы. Рендер трека — ffmpeg на ~15 секунд, а тик
+    # ходит каждые 3 минуты: пока аккаунт стоял в кулдауне после ошибки, сервер часами
+    # перекодировал один и тот же трек впустую (в логе подряд «ffmpeg: сегмент
+    # track_002.mp4»). Проверка бесплатная и слот не занимает.
+    if vk.pool_is_busy():
+        get_logger().info("Трек %s: личный токен занят — ждём следующего тика", track.title)
+        return f"трек {track.position} отложен (нет свободного токена)"
+
     artist = track.artist or album.artist
     title = build_release_header(settings.post, artist, track.title, settings.post.track_kind)
     message = build_release_text(settings.post, artist, track.title, settings.post.track_kind)

@@ -86,6 +86,13 @@ class VKClient:
             )
         return lease
 
+    def pool_is_busy(self) -> bool:
+        """Свободного слота нет прямо сейчас — БЕЗ захвата. Нужна, чтобы не тратить
+        ffmpeg на рендер трека, который всё равно некуда будет залить."""
+        if self._token_pool is None:
+            return False
+        return not self._token_pool.has_free_account()
+
     def upload_video(self, file_path: Path, name: str, description: str) -> str:
         """Загружает видео В ГРУППУ user-токеном. Возвращает attachment video-GID_ID.
 

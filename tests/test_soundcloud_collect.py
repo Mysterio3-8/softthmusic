@@ -114,6 +114,9 @@ def test_busy_token_does_not_burn_track_attempts(tmp_path, monkeypatch):
     monkeypatch.setattr(album_publisher, "build_release_text", lambda *a, **k: "t")
 
     class _VK:
+        def pool_is_busy(self):
+            return False  # слот есть, падаем уже на самой загрузке
+
         def upload_video(self, *a, **k):
             raise VKTokenBusy("занято")
 
@@ -141,3 +144,45 @@ def _cfg():
         soundcloud = _Settings()
 
     return _Config()
+
+
+def test_busy_pool_skips_render(tmp_path, monkeypatch):
+    """Регрессия 07.08: рендер трека шёл ДО проверки токена, а тик ходит каждые 3 минуты.
+    Пока аккаунт стоял в кулдауне после ошибки, сервер часами перекодировал один и тот же
+    трек впустую — в логе подряд «ffmpeg: сегмент track_002.mp4»."""
+    from app import album_publisher
+
+    rendered = []
+
+    class _Queue:
+        def next_pending_track(self, album_id):
+            class _T:
+                id = 1
+                position = 2
+                title = "2L8"
+                artist = "A"
+                audio_path = str(tmp_path / "a.mp3")
+                cover_path = str(tmp_path / "c.jpg")
+            return _T()
+
+    class _Album:
+        id = 1
+        title = "Alb"
+        artist = "A"
+        chat_id = None
+        next_post_at = None
+
+    class _VKBusy:
+        def pool_is_busy(self):
+            return True
+
+    monkeypatch.setattr(
+        album_publisher, "render_track_video", lambda *a, **k: rendered.append("x")
+    )
+
+    result = album_publisher._continue_album(
+        _cfg(), _Queue(), _VKBusy(), None, _Album(), album_publisher.now_msk()
+    )
+
+    assert "отложен" in result
+    assert rendered == [], "при занятом пуле рендерить нечего"
