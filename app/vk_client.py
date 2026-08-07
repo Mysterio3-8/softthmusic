@@ -41,6 +41,7 @@ def build_token_pool(config) -> VkTokenPool | None:
         config.vk_upload_token_envs,
         daily_cap=config.vk_token_daily_cap,
         min_gap_minutes=config.vk_token_min_gap_minutes,
+        caller="tracks",
     )
 
 
