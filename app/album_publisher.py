@@ -209,6 +209,13 @@ def _continue_album(
         render_track_video(Path(track.audio_path), Path(track.cover_path), video_path)
         attachment = vk.upload_video(video_path, title, message)
         vk.post_now(message, attachment)
+    except VKTokenBusy as exc:
+        # Занятый пул — не вина трека: попытку не тратим, файлы не выбрасываем, просто
+        # ждём следующего тика. Без этой ветки busy-исключение либо роняло тик целиком
+        # (VKTokenBusy не наследник VKError), либо сжигало бы бюджет попыток трека и
+        # уводило его в failed на ровном месте.
+        get_logger().warning("Трек %s отложен: %s", track.title, exc)
+        return f"трек {track.position} отложен (нет свободного токена)"
     except (MediaError, VKError) as exc:
         attempts = queue.mark_track_error(track.id, settings.max_track_attempts)
         get_logger().error("Трек %s (попытка %d): %s", track.title, attempts, exc)
