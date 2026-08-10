@@ -7,6 +7,13 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/yt-vk-publisher
 Environment=TZ=Europe/Moscow
+# Сборник из 15 треков — это десятки минут ffmpeg на ЕДИНСТВЕННОМ ядре. Без уступки
+# по приоритету сервер переставал отвечать на ssh (хендшейк проходил, аутентификация
+# уже нет) — то есть на время рендера пропадал доступ к деплою. Ядро при этом не
+# простаивает: Nice/CPUWeight уступают только когда есть кому уступить.
+Nice=15
+CPUWeight=20
+IOWeight=20
 ExecStart=/opt/yt-vk-publisher/venv/bin/python app/yt_playlists_cli.py tick
 # Сборник из 15 треков — это скачивание + рендер видео на каждый трек + склейка.
 # На 1-ядерном VPS это десятки минут, поэтому потолок больше, чем у альбомного тика.
