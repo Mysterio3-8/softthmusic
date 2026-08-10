@@ -82,6 +82,7 @@ def _playlists_config(tmp_path, **overrides) -> YoutubePlaylistsConfig:
         ready_dir=tmp_path / "ready",
         ready_keep_days=5,
         remote_host="vps",
+        deliver_chat="",
         header="♾️ Плейлисты от Infinity Music",
         playlist_description="Сборник собран вручную.",
         title_templates=["Плейлист {year}: музыка на каждый день"],

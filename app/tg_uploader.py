@@ -24,23 +24,29 @@ CAPTION_LIMIT = 1024
 class TelegramUploader:
     """None вместо экземпляра, если креды не заданы — вызывающий уйдёт на запасной путь."""
 
-    def __init__(self, *, api_id: int, api_hash: str, session_name: str, chat_id: int) -> None:
+    def __init__(
+        self, *, api_id: int, api_hash: str, session_name: str, chat: int | str
+    ) -> None:
         self._api_id = api_id
         self._api_hash = api_hash
         self._session_name = session_name
-        self._chat_id = chat_id
+        self._chat = chat
 
     @classmethod
     def from_config(cls, config) -> "TelegramUploader | None":
         if not (config.tg_api_id and config.tg_api_hash and config.tg_session_name):
             return None
-        if not config.telegram_admin_chat_id:
+        # deliver_chat перекрывает адресата: файл отдаётся ВАШЕЙ пользовательской
+        # сессией, поэтому по умолчанию (собственный chat_id) он падает в «Избранное».
+        # Хотите в чат с ботом — впишите «@muz_damn_bot» в config.yaml.
+        chat = config.youtube_playlists.deliver_chat or config.telegram_admin_chat_id
+        if not chat:
             return None
         return cls(
             api_id=config.tg_api_id,
             api_hash=config.tg_api_hash,
             session_name=config.tg_session_name,
-            chat_id=config.telegram_admin_chat_id,
+            chat=chat,
         )
 
     def send_file(self, path: Path, caption: str = "") -> bool:
@@ -65,7 +71,7 @@ class TelegramUploader:
             # Документом, а не видео: Telegram перекодирует видео и режет качество, а
             # владельцу нужен ровно тот файл, который поедет на YouTube.
             await client.send_file(
-                self._chat_id,
+                self._chat,
                 str(path),
                 caption=caption[:CAPTION_LIMIT],
                 force_document=True,

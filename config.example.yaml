@@ -114,6 +114,9 @@ youtube_playlists:
   ready_dir: ready        # готовые файлы для заливки на YouTube
   ready_keep_days: 5
   remote_host: "news-rewriter-vps"
+  # Куда слать готовый сборник. Пусто → TELEGRAM_ADMIN_CHAT_ID; поскольку файл отдаёт
+  # ВАША пользовательская сессия, это «Избранное». Хотите в чат с ботом — "@ваш_бот".
+  deliver_chat: ""
   header: "♾️ Плейлисты от Infinity Music"
   playlist_description: |
     Сборник собран вручную: только целые треки, без обрезок и без рекламы внутри.

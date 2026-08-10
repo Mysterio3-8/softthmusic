@@ -75,6 +75,10 @@ class YoutubePlaylistsConfig:
     ready_dir: Path
     ready_keep_days: int
     remote_host: str
+    deliver_chat: str
+    """Куда слать готовый сборник. Пусто → TELEGRAM_ADMIN_CHAT_ID, а поскольку файл
+    отдаётся ВАШЕЙ же пользовательской сессией, это «Избранное». Можно указать
+    «@muz_damn_bot» или id любого чата — уедет туда."""
     header: str
     playlist_description: str
     title_templates: list[str]
@@ -285,6 +289,7 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         ready_dir=Path(raw.get("ready_dir", "ready")),
         ready_keep_days=int(raw.get("ready_keep_days", 5)),
         remote_host=str(raw.get("remote_host", "news-rewriter-vps")),
+        deliver_chat=str(raw.get("deliver_chat", "")).strip(),
         header=str(raw.get("header", "♾️ Плейлисты от Infinity Music")),
         playlist_description=str(raw.get("playlist_description", "")),
         title_templates=[str(item) for item in (raw.get("title_templates") or [])],
