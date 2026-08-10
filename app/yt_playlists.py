@@ -142,14 +142,16 @@ def _process(
 
     try:
         compilation = build_compilation(config, playlists, playlist, work_dir, now)
-        attachment = vk.upload_video(
-            compilation.video_path, compilation.title, compilation.description
-        )
+
+        # Файл уходит владельцу ДО публикации в VK (ТЗ 2026-08-10: «пускай сборники
+        # приходят сразу заранее, не после публикации»). Так он получает сборник даже
+        # если VK откажет: там дальше и занятый токен пула, и любая ошибка API.
+        video_path = _deliver(config, playlists, playlist, compilation, notifier)
+
+        attachment = vk.upload_video(video_path, compilation.title, compilation.description)
         post_id = vk.post_now(compilation.post_text, attachment)
         posts.log_post(POST_KIND_YT_PLAYLIST)
         playlists.mark_published(playlist.id, f"https://vk.com/wall-{config.group_id}_{post_id}")
-
-        _deliver(config, compilation, notifier)
         return f"опубликован сборник «{compilation.title}» ({len(compilation.tracks)} треков)"
     except VKTokenBusy as exc:
         # НЕ поломка: свободного токена нет прямо сейчас. Попытку не тратим и файлы не
@@ -295,9 +297,24 @@ def _ensure_own_covers(tracks: list[Track]) -> None:
         track.cover_path = own
 
 
-def _deliver(config: Config, compilation: Compilation, notifier: Notifier) -> None:
-    """Отдать готовый файл владельцу. Сбой отдачи НЕ отменяет уже сделанную публикацию."""
+def _deliver(
+    config: Config,
+    playlists: PlaylistQueue,
+    playlist: PlaylistRow,
+    compilation: Compilation,
+    notifier: Notifier,
+) -> Path:
+    """Отдать готовый файл владельцу и вернуть путь, с которого грузить в VK.
+
+    Отдача переносит файл в `ready/`, поэтому путь после неё МЕНЯЕТСЯ — грузить в VK
+    надо именно возвращённый, иначе загрузка не найдёт файл.
+
+    Сбой отдачи не роняет тик: сборник важнее, публикация пойдёт с исходного пути.
+    Повторная попытка того же плейлиста файл не дублирует — см. `delivered`."""
     settings = config.youtube_playlists
+    if playlist.delivered:
+        get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
+        return compilation.video_path
     try:
         result = deliver(
             compilation.video_path,
@@ -309,13 +326,17 @@ def _deliver(config: Config, compilation: Compilation, notifier: Notifier) -> No
             caption=f"{compilation.title}\n\nГотов к заливке на YouTube.",
             uploader=TelegramUploader.from_config(config),
         )
+        playlists.mark_delivered(playlist.id)
         notifier.send(
-            f"🎬 Сборник «{compilation.title}» опубликован в VK.\n"
-            f"Треков: {len(compilation.tracks)}.\nФайл {result.message}\n\n"
+            f"🎬 Сборник «{compilation.title}» готов.\n"
+            f"Треков: {len(compilation.tracks)}.\nФайл {result.message}\n"
+            f"Публикую в VK.\n\n"
             f"Описание для YouTube:\n{compilation.description[:2500]}"
         )
+        return result.path
     except Exception as exc:  # noqa: BLE001 — отдача файла не должна ронять тик
         get_logger().warning("Не удалось отдать сборник владельцу: %s", exc)
+        return compilation.video_path
 
 
 def _safe_file_name(title: str) -> str:

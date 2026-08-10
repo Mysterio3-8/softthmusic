@@ -29,6 +29,10 @@ class PlaylistRow:
     source: str
     status: str
     attempts: int
+    delivered: bool = False
+    """Файл уже уходил владельцу. Нужен, потому что отдаём мы его ДО публикации в VK:
+    если публикация сорвётся (занят токен) и плейлист вернётся в очередь, повторная
+    попытка не должна прислать тот же сборник вторым файлом."""
 
 
 class PlaylistQueue:
@@ -57,7 +61,15 @@ class PlaylistQueue:
             CREATE INDEX IF NOT EXISTS idx_yt_playlists_status ON yt_playlists(status, id);
             """
         )
+        self._add_missing_columns()
         self._conn.commit()
+
+    def _add_missing_columns(self) -> None:
+        """CREATE TABLE IF NOT EXISTS не мигрирует уже существующую таблицу — новая
+        колонка на проде не появилась бы, и любой SELECT падал бы «no such column»."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(yt_playlists)")}
+        if "delivered_at" not in existing:
+            self._conn.execute("ALTER TABLE yt_playlists ADD COLUMN delivered_at TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -84,6 +96,13 @@ class PlaylistQueue:
             "SELECT COUNT(*) AS n FROM yt_playlists WHERE status = ?", (PLAYLIST_PENDING,)
         ).fetchone()
         return int(row["n"])
+
+    def mark_delivered(self, playlist_id: int) -> None:
+        """Файл отдан владельцу. Ставится ДО публикации в VK — см. PlaylistRow.delivered."""
+        self._conn.execute(
+            "UPDATE yt_playlists SET delivered_at = ? WHERE id = ?", (_now_iso(), playlist_id)
+        )
+        self._conn.commit()
 
     def mark_published(self, playlist_id: int, post_url: str) -> None:
         self._conn.execute(
@@ -129,6 +148,7 @@ def _to_row(row: sqlite3.Row) -> PlaylistRow:
         source=row["source"],
         status=row["status"],
         attempts=row["attempts"],
+        delivered=bool(row["delivered_at"]),
     )
 
 
