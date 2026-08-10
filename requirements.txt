@@ -7,3 +7,5 @@ requests>=2.31.0
 # Подпись «исполнитель — трек» на видео рисуется Pillow (drawtext ffmpeg не годится
 # для кириллицы и переносов — см. app/overlay.py).
 Pillow>=10.0.0
+# MTProto: сборник весит 120-150 МБ, Bot API отдаёт максимум 50 МБ (app/tg_uploader.py).
+Telethon>=1.36.0

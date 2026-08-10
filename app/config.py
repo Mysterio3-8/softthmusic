@@ -108,6 +108,11 @@ class Config:
     )
     telegram_bot_token: str = ""
     telegram_admin_chat_id: int | None = None
+    # MTProto-доставка сборника владельцу. Нужна потому, что Bot API отдаёт максимум
+    # 50 МБ, а сборник весит 120-150 МБ. Пусто → остаётся запасной путь (ready/ + scp).
+    tg_api_id: int = 0
+    tg_api_hash: str = ""
+    tg_session_name: str = ""
 
     @property
     def owner_id(self) -> int:
@@ -137,7 +142,7 @@ def load_config(config_path: str | Path = "config.yaml", env_path: str | Path = 
         raise ConfigError(f"Файл конфигурации не найден: {path}")
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return _build_config(raw, group_token, user_token, _telegram_env())
+    return _build_config(raw, group_token, user_token, _telegram_env(), _mtproto_env())
 
 
 def _telegram_env() -> tuple[str, int | None]:
@@ -148,8 +153,23 @@ def _telegram_env() -> tuple[str, int | None]:
     return token, chat_id
 
 
+def _mtproto_env() -> tuple[int, str, str]:
+    """Креды пользовательской сессии Telegram — ими отдаётся сборник (файл >50 МБ).
+    Не заданы → нули, и доставка молча уходит на запасной путь."""
+    raw_id = os.getenv("TG_API_ID", "").strip()
+    return (
+        int(raw_id) if raw_id.isdigit() else 0,
+        os.getenv("TG_API_HASH", "").strip(),
+        os.getenv("TG_SESSION_NAME", "").strip(),
+    )
+
+
 def _build_config(
-    raw: dict, group_token: str, user_token: str, telegram: tuple[str, int | None] = ("", None)
+    raw: dict,
+    group_token: str,
+    user_token: str,
+    telegram: tuple[str, int | None] = ("", None),
+    mtproto: tuple[int, str, str] = (0, "", ""),
 ) -> Config:
     vk = raw.get("vk") or {}
     youtube = raw.get("youtube") or {}
@@ -203,6 +223,9 @@ def _build_config(
         youtube_playlists=_build_youtube_playlists(raw.get("youtube_playlists") or {}),
         telegram_bot_token=telegram[0],
         telegram_admin_chat_id=telegram[1],
+        tg_api_id=mtproto[0],
+        tg_api_hash=mtproto[1],
+        tg_session_name=mtproto[2],
     )
 
 

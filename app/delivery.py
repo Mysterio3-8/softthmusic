@@ -43,10 +43,23 @@ def deliver(
     chat_id: int | None,
     remote_host: str = "",
     caption: str = "",
+    uploader=None,
 ) -> DeliveryResult:
-    """Переносит сборник в ready_dir и, если влезает, шлёт файлом в Telegram."""
+    """Переносит сборник в ready_dir и отправляет его владельцу в Telegram.
+
+    Порядок попыток жёсткий и не случайный:
+
+    1. **MTProto** (`uploader`) — единственный путь, которым реально уходит сборник:
+       он весит 120-150 МБ, а Bot API отдаёт максимум 50 МБ. Первый живой сборник
+       (128 МБ) именно поэтому и не пришёл.
+    2. **Bot API** — только если файл вдруг мелкий (короткий плейлист).
+    3. **ready/ + команда scp** — когда ни один канал не настроен.
+    """
     stored = _store(video_path, ready_dir, file_name)
     size_mb = stored.stat().st_size / 1e6
+
+    if uploader is not None and uploader.send_file(stored, caption):
+        return DeliveryResult(stored, True, f"отправлен в Telegram ({size_mb:.0f} МБ)")
 
     if stored.stat().st_size <= BOT_API_FILE_LIMIT_BYTES and bot_token and chat_id:
         if _send_document(stored, bot_token, chat_id, caption):

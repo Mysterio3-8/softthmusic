@@ -33,6 +33,7 @@ from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
 from app.seo import build_hashtags, build_search_line
 from app.soundcloud import Track
+from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
 from app.yt_source import YouTubeSourceError, discover_playlists, download_playlist
@@ -306,6 +307,7 @@ def _deliver(config: Config, compilation: Compilation, notifier: Notifier) -> No
             chat_id=config.telegram_admin_chat_id,
             remote_host=settings.remote_host,
             caption=f"{compilation.title}\n\nГотов к заливке на YouTube.",
+            uploader=TelegramUploader.from_config(config),
         )
         notifier.send(
             f"🎬 Сборник «{compilation.title}» опубликован в VK.\n"
