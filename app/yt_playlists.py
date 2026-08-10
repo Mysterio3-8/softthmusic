@@ -185,7 +185,7 @@ def build_compilation(
     return Compilation(
         video_path=video_path,
         title=title,
-        post_text=build_post_text(config, title, len(tracks)),
+        post_text=build_post_text(config, title, tracks),
         description=build_description(config, title, tracklist, tracks),
         tracks=tracks,
     )
@@ -201,8 +201,17 @@ def build_title(templates: list[str], recent: list[str], now: datetime) -> str:
     return random.choice(unused or variants)
 
 
-def build_post_text(config: Config, title: str, track_count: int) -> str:
-    """Запись на стене — короткая: заголовок, что это за сервис, ссылка, теги.
+def playlist_artists(tracks: list[Track], limit: int = 8) -> list[str]:
+    """Исполнители сборника без повторов — это и есть реальные запросы к нему.
+
+    Название сборника в ключи НЕ идёт: оно придумано нами («Плейлист 2026: музыка на
+    каждый день»), никто его не ищет, а в теге вся фраза слипалась в одну нелепую
+    простыню `#плейлист_2026_музыка_на_каждый_день`."""
+    return list(dict.fromkeys(track.artist for track in tracks if track.artist))[:limit]
+
+
+def build_post_text(config: Config, title: str, tracks: list[Track]) -> str:
+    """Запись на стене — короткая: заголовок, сколько треков, ссылка, теги.
 
     Треклист с таймингами сюда НЕ идёт (ТЗ 2026-08-10: «в описание по таймингам»):
     под записью он занял бы пол-экрана, а в описании видео он и полезнее, и не мешает."""
@@ -217,11 +226,11 @@ def build_post_text(config: Config, title: str, track_count: int) -> str:
         if url
     ]
     tags = build_hashtags(
-        [title], style.base_tags, style.hashtag_group, style.post_tag_limit
+        playlist_artists(tracks, 3), style.base_tags, style.hashtag_group, style.post_tag_limit
     )
     blocks = [
-        f"{settings.header} {title}".strip(),
-        f"🎵 Треков в сборнике: {track_count}",
+        f"{settings.header}\n{title}".strip(),
+        f"🎵 Треков в сборнике: {len(tracks)}",
         "\n".join(links),
         " ".join(tags),
     ]
@@ -235,17 +244,16 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
     VK, и внешние Google/Яндекс) читает его целиком."""
     settings = config.youtube_playlists
     style = config.soundcloud.post
-    # Исполнители сборника — это и есть реальные поисковые запросы к нему.
-    artists = list(dict.fromkeys(track.artist for track in tracks if track.artist))[:8]
+    artists = playlist_artists(tracks)
     blocks = [
-        f"{settings.header} {title}".strip(),
+        f"{settings.header}\n{title}".strip(),
         settings.playlist_description.strip(),
         tracklist,
-        build_search_line([title, *artists], style.search_phrases),
+        build_search_line(artists, style.search_phrases),
         style.service_block,
         " ".join(
             build_hashtags(
-                [title, *artists], style.base_tags, style.hashtag_group, style.video_tag_limit
+                artists, style.base_tags, style.hashtag_group, style.video_tag_limit
             )
         ),
     ]

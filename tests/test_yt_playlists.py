@@ -224,13 +224,36 @@ def test_title_falls_back_when_all_templates_used():
 
 def test_post_text_is_short_and_has_bot_link(tmp_path):
     config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", 12)
+    text = build_post_text(config, "Плейлист 2026", _tracks())
 
-    assert text.startswith("♾️ Плейлисты от Infinity Music Плейлист 2026")
+    assert text.startswith("♾️ Плейлисты от Infinity Music\nПлейлист 2026")
     assert "https://t.me/tgram_music_bot" in text
+    assert "Треков в сборнике: 2" in text
     assert "#музыка@tgmusic" in text
     # Тайминги в записи не идут — они уезжают в описание видео (ТЗ 2026-08-10).
     assert "00:00" not in text
+
+
+def test_invented_title_never_becomes_a_hashtag(tmp_path):
+    """Название сборника придумано нами — в теге вся фраза слипалась в простыню."""
+    config = _config(tmp_path)
+    title = "Плейлист 2026: музыка на каждый день"
+
+    for text in (
+        build_post_text(config, title, _tracks()),
+        build_description(config, title, "00:00 1. Ария — Штиль", _tracks()),
+    ):
+        assert "#плейлист_2026" not in text
+
+
+def test_search_phrases_are_built_from_artists_not_from_the_title(tmp_path):
+    config = _config(tmp_path)
+    description = build_description(
+        config, "Плейлист 2026", "00:00 1. Ария — Штиль", _tracks()
+    )
+
+    assert "Ария слушать онлайн" in description
+    assert "Плейлист 2026 слушать онлайн" not in description
 
 
 def test_description_has_timings_search_phrases_and_service(tmp_path):
@@ -247,7 +270,7 @@ def test_description_has_timings_search_phrases_and_service(tmp_path):
 
 def test_description_is_bigger_than_post_text(tmp_path):
     config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", 2)
+    text = build_post_text(config, "Плейлист 2026", _tracks())
     description = build_description(config, "Плейлист 2026", "00:00 1. Ария — Штиль", _tracks())
 
     assert len(description) > len(text)
