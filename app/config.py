@@ -32,6 +32,15 @@ class PostStyle:
     hashtag_group: str
     track_kind: str
     album_kind: str
+    # SEO (ТЗ 2026-08-10). Пустые значения = прежнее поведение: один тег и никаких
+    # поисковых фраз, то есть новые поля ничего не ломают у существующего конфига.
+    base_tags: list[str] = field(default_factory=list)
+    search_phrases: list[str] = field(default_factory=list)
+    post_tag_limit: int = 6
+    video_tag_limit: int = 16
+    service_block: str = ""
+    """Блок «что это за сервис» в конце описания видео: ссылка на бота и на канал.
+    Он и есть та внешняя ссылка, ради которой всё SEO затевалось."""
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,29 @@ class SoundCloudConfig:
     max_track_attempts: int
     work_dir: Path
     post: PostStyle
+
+
+@dataclass(frozen=True)
+class YoutubePlaylistsConfig:
+    """Поток сборников с YouTube (ТЗ 2026-08-10). enabled=False → его как будто нет."""
+
+    enabled: bool
+    sources: list[str]
+    discover_limit: int
+    max_tracks: int
+    max_posts_per_day: int
+    min_interval_minutes: int
+    max_interval_minutes: int
+    quiet_start_hour: int
+    quiet_end_hour: int
+    max_attempts: int
+    work_dir: Path
+    ready_dir: Path
+    ready_keep_days: int
+    remote_host: str
+    header: str
+    playlist_description: str
+    title_templates: list[str]
 
 
 @dataclass
@@ -71,6 +103,9 @@ class Config:
     # Альбомный поток необязателен: без секции soundcloud: и Telegram-переменных
     # проект остаётся чистым YouTube-паблишером.
     soundcloud: SoundCloudConfig = field(default_factory=lambda: _build_soundcloud({}))
+    youtube_playlists: YoutubePlaylistsConfig = field(
+        default_factory=lambda: _build_youtube_playlists({})
+    )
     telegram_bot_token: str = ""
     telegram_admin_chat_id: int | None = None
 
@@ -165,6 +200,7 @@ def _build_config(
         downloads_dir=Path(paths.get("downloads", "downloads")),
         log_path=Path(paths.get("logs", "logs/publisher.log")),
         soundcloud=_build_soundcloud(raw.get("soundcloud") or {}),
+        youtube_playlists=_build_youtube_playlists(raw.get("youtube_playlists") or {}),
         telegram_bot_token=telegram[0],
         telegram_admin_chat_id=telegram[1],
     )
@@ -197,6 +233,41 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
     )
 
 
+def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
+    min_interval = int(raw.get("min_interval_minutes", 300))
+    max_interval = int(raw.get("max_interval_minutes", 480))
+    if min_interval > max_interval:
+        raise ConfigError(
+            "youtube_playlists.min_interval_minutes больше max_interval_minutes — "
+            "случайный интервал не построить"
+        )
+    quiet_start = int(raw.get("quiet_start_hour", 0))
+    quiet_end = int(raw.get("quiet_end_hour", 0))
+    for name, hour in (("quiet_start_hour", quiet_start), ("quiet_end_hour", quiet_end)):
+        if not 0 <= hour <= 23:
+            raise ConfigError(f"youtube_playlists.{name} должен быть в диапазоне 0..23")
+
+    return YoutubePlaylistsConfig(
+        enabled=bool(raw.get("enabled", False)),
+        sources=[str(item).strip() for item in (raw.get("sources") or []) if str(item).strip()],
+        discover_limit=int(raw.get("discover_limit", 20)),
+        max_tracks=int(raw.get("max_tracks", 15)),
+        max_posts_per_day=int(raw.get("max_posts_per_day", 2)),
+        min_interval_minutes=min_interval,
+        max_interval_minutes=max_interval,
+        quiet_start_hour=quiet_start,
+        quiet_end_hour=quiet_end,
+        max_attempts=int(raw.get("max_attempts", 3)),
+        work_dir=Path(raw.get("work_dir", "downloads/yt_playlists")),
+        ready_dir=Path(raw.get("ready_dir", "ready")),
+        ready_keep_days=int(raw.get("ready_keep_days", 5)),
+        remote_host=str(raw.get("remote_host", "news-rewriter-vps")),
+        header=str(raw.get("header", "♾️ Плейлисты от Infinity Music")),
+        playlist_description=str(raw.get("playlist_description", "")),
+        title_templates=[str(item) for item in (raw.get("title_templates") or [])],
+    )
+
+
 def _build_post_style(raw: dict) -> PostStyle:
     return PostStyle(
         flag=str(raw.get("flag", "🎧")),
@@ -209,6 +280,11 @@ def _build_post_style(raw: dict) -> PostStyle:
         hashtag_group=str(raw.get("hashtag_group", "")),
         track_kind=str(raw.get("track_kind", "Single")),
         album_kind=str(raw.get("album_kind", "Album")),
+        base_tags=[str(tag) for tag in (raw.get("base_tags") or [])],
+        search_phrases=[str(phrase) for phrase in (raw.get("search_phrases") or [])],
+        post_tag_limit=int(raw.get("post_tag_limit", 6)),
+        video_tag_limit=int(raw.get("video_tag_limit", 16)),
+        service_block=str(raw.get("service_block", "")).strip(),
     )
 
 

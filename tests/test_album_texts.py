@@ -35,7 +35,7 @@ def _style(**overrides):
         "flag": "🇸🇪",
         "title_suffix": "Без цензуры",
         "listen_label": "♾️ Слушать в Telegram бесплатно и без цензуры:",
-        "listen_url": "https://t.me/tgram_music_bot",
+        "listen_url": "https://t.me/muz_damn_bot",
         "channel_label": "📢 Канал:",
         "channel_url": "",
         "hashtag_template": "{artist}",
@@ -54,7 +54,7 @@ def test_single_post_matches_the_requested_layout():
 
     assert text == (
         "🇸🇪 Imminence — False Light (Single) | Без цензуры\n\n"
-        "♾️ Слушать в Telegram бесплатно и без цензуры: https://t.me/tgram_music_bot\n"
+        "♾️ Слушать в Telegram бесплатно и без цензуры: https://t.me/muz_damn_bot\n"
         "#imminence@posthardcore"
     )
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=YouTube-плейлисты -> VK: один шаг конвейера сборников
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/yt-vk-publisher
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/yt-vk-publisher/venv/bin/python app/yt_playlists_cli.py tick
+# Сборник из 15 треков — это скачивание + рендер видео на каждый трек + склейка.
+# На 1-ядерном VPS это десятки минут, поэтому потолок больше, чем у альбомного тика.
+TimeoutStartSec=7200
+
+[Install]
+WantedBy=multi-user.target

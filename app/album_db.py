@@ -108,16 +108,42 @@ class AlbumQueue:
         )
         self._conn.commit()
 
-    def posts_since(self, moment: datetime) -> int:
+    def posts_since(self, moment: datetime, kinds: tuple[str, ...] | None = None) -> int:
         """created_at хранится в UTC — границу приводим туда же.
 
         Сравнение идёт строками, поэтому смешивать смещения нельзя: «+03:00» и
         «+00:00» лексикографически сравниваются по цифрам, а не по моменту времени.
+
+        `kinds` появился, когда рядом встал второй поток (сборники с YouTube): у него
+        свой суточный лимит, и без фильтра два потока съедали бы счётчик друг друга.
+        None — считать все записи, как раньше.
         """
+        if kinds is None:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM post_log WHERE created_at >= ?",
+                (_to_utc_iso(moment),),
+            ).fetchone()
+            return int(row["n"])
+
+        placeholders = ",".join("?" * len(kinds))
         row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM post_log WHERE created_at >= ?", (_to_utc_iso(moment),)
+            f"SELECT COUNT(*) AS n FROM post_log "
+            f"WHERE created_at >= ? AND kind IN ({placeholders})",
+            (_to_utc_iso(moment), *kinds),
         ).fetchone()
         return int(row["n"])
+
+    def last_post_at(self, kind: str) -> datetime | None:
+        """Когда последний раз публиковали запись этого вида.
+
+        Нужна интервалу между сборниками: держать «следующий момент» в отдельной
+        колонке, как у альбомов, тут нечего — очередь сборников не имеет активной
+        записи, работа идёт по одному плейлисту за тик."""
+        row = self._conn.execute(
+            "SELECT created_at FROM post_log WHERE kind = ? ORDER BY created_at DESC LIMIT 1",
+            (kind,),
+        ).fetchone()
+        return datetime.fromisoformat(row["created_at"]) if row else None
 
     def enqueue(self, url: str, title: str, artist: str, tracks_total: int, chat_id: int | None) -> int:
         cursor = self._conn.execute(

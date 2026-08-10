@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from app import seo
+
 # VK ограничивает текст записи на стене ~16000 символами.
 VK_MESSAGE_LIMIT = 16000
 
@@ -44,7 +46,7 @@ def build_release_header(style, artist: str, name: str, kind: str) -> str:
 
 
 def build_release_text(style, artist: str, name: str, kind: str, body: str = "") -> str:
-    """Пост-релиз: шапка, необязательный треклист, ссылки, тег.
+    """Пост-релиз: шапка, необязательный треклист, ссылки, теги.
 
     style — PostStyle из config. Пустой url просто не даёт своей строки, поэтому
     ссылку на канал можно убрать, не трогая код.
@@ -57,13 +59,82 @@ def build_release_text(style, artist: str, name: str, kind: str, body: str = "")
         )
         if url
     ]
-    hashtag = build_hashtag(style.hashtag_template, artist, name, style.hashtag_group)
+    tags = _release_tags(style, artist, name, style.post_tag_limit)
 
     blocks = [build_release_header(style, artist, name, kind)]
     if body.strip():
         blocks.append(body.strip())
-    blocks.append("\n".join(links + ([hashtag] if hashtag else [])))
+    blocks.append("\n".join(links + ([" ".join(tags)] if tags else [])))
     return "\n\n".join(block for block in blocks if block)
+
+
+def seo_configured(style) -> bool:
+    """Заполнены ли SEO-поля стиля.
+
+    Пока они пусты, публикации обязаны выглядеть ТОЧНО как раньше: один тег по
+    hashtag_template, описание видео = текст записи. Без этой развилки включение SEO
+    было бы необратимым и незаметно меняло оформление у всех, кто его не настраивал."""
+    return bool(
+        getattr(style, "search_phrases", None)
+        or getattr(style, "base_tags", None)
+        or getattr(style, "service_block", "")
+    )
+
+
+def build_release_video_description(
+    style, artist: str, name: str, kind: str, body: str = ""
+) -> str:
+    """Описание ВИДЕОЗАПИСИ релиза — большое, поисковое (ТЗ 2026-08-10).
+
+    Отдельно от текста записи: у видеообъекта VK своё индексируемое поле, в ленте оно
+    свёрнуто, поэтому туда уходят варианты запроса, блок про сервис и полный набор
+    тегов. Без настроенных SEO-полей возвращает ровно текст записи — прежнее
+    поведение, при котором описание видео и запись совпадали."""
+    if not seo_configured(style):
+        return build_release_text(style, artist, name, kind, body)
+
+    links = "\n".join(
+        f"{label} {url}".strip()
+        for label, url in (
+            (style.listen_label, style.listen_url),
+            (style.channel_label, style.channel_url),
+        )
+        if url
+    )
+    return seo.build_video_description(
+        header=build_release_header(style, artist, name, kind),
+        body="\n\n".join(part for part in (body.strip(), links) if part),
+        subjects=_release_subjects(artist, name),
+        phrases=style.search_phrases,
+        base_tags=style.base_tags,
+        group=style.hashtag_group,
+        tag_limit=style.video_tag_limit,
+        service_block=style.service_block,
+    )
+
+
+def _release_subjects(artist: str, name: str) -> list[str]:
+    """Что человек реально набирает в поиске: артист, название и связка «артист название»."""
+    subjects = [part for part in (artist.strip(), name.strip()) if part]
+    if len(subjects) == 2:
+        subjects.append(f"{subjects[0]} {subjects[1]}")
+    return subjects
+
+
+def _release_tags(style, artist: str, name: str, limit: int) -> list[str]:
+    """Теги релиза. Ключевой тег по hashtag_template идёт ПЕРВЫМ — он уникален для
+    релиза и именно он склеивает трек с его альбомом. Дальше — теги по артисту и
+    названию плюс постоянные теги сообщества, но только если SEO настроено."""
+    primary = build_hashtag(style.hashtag_template, artist, name, style.hashtag_group)
+    tags = [primary] if primary else []
+    if not seo_configured(style):
+        return tags
+    for tag in seo.build_hashtags(
+        _release_subjects(artist, name), style.base_tags, style.hashtag_group, limit
+    ):
+        if tag not in tags:
+            tags.append(tag)
+    return tags[:limit] if limit > 0 else tags
 
 
 def _release_line(artist: str, name: str, kind: str, suffix: str) -> str:

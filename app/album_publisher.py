@@ -24,7 +24,13 @@ from app.config import Config
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
 from app.notifier import Notifier
-from app.post_builder import build_release_header, build_release_text, build_tracklist
+from app.overlay import TrackCaption
+from app.post_builder import (
+    build_release_header,
+    build_release_text,
+    build_release_video_description,
+    build_tracklist,
+)
 from app.soundcloud import SoundCloudError, Track, covers_are_identical, download_playlist
 from app.vk_client import VKClient, VKError, VKTokenBusy
 
@@ -61,7 +67,10 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
 
 
 def _daily_limit_reached(queue: AlbumQueue, max_posts_per_day: int, now: datetime) -> bool:
-    return queue.posts_since(now - timedelta(days=1)) >= max_posts_per_day
+    """Считаем только СВОИ записи: у сборников с YouTube свой лимит и свой счётчик,
+    иначе два потока в одном сообществе съедали бы квоту друг друга."""
+    kinds = (POST_KIND_ALBUM, POST_KIND_TRACK)
+    return queue.posts_since(now - timedelta(days=1), kinds) >= max_posts_per_day
 
 
 def _start_album(
@@ -145,6 +154,11 @@ def _ensure_own_covers(tracks: list[Track]) -> None:
         track.cover_path = own
 
 
+def _track_caption(artist: str, title: str) -> TrackCaption:
+    """Подпись на первые 10 секунд трека (ТЗ 2026-08-10)."""
+    return TrackCaption(artist=(artist or "").strip(), title=(title or "").strip())
+
+
 def _render_compilation(tracks: list[Track], work_dir: Path) -> Path:
     """Склеивает треки в одно видео. Обложка меняется по трекам сама собой:
     у каждого сегмента своя картинка, а если арт у всех один — выходит статика."""
@@ -156,7 +170,10 @@ def _render_compilation(tracks: list[Track], work_dir: Path) -> Path:
     segments = []
     for track in tracks:
         segment = work_dir / f"seg_{track.position:03d}.mp4"
-        render_track_video(track.audio_path, track.cover_path, segment)
+        render_track_video(
+            track.audio_path, track.cover_path, segment,
+            caption=_track_caption(track.artist, track.title),
+        )
         segments.append(segment)
 
     compilation = work_dir / "compilation.mp4"
@@ -181,8 +198,12 @@ def _publish_compilation(
         settings.post, album.artist, album.title, settings.post.album_kind, tracklist
     )
 
-    # Описание видео = текст поста: под записью и в каталоге VK одно и то же.
-    attachment = vk.upload_video(video_path, title, message)
+    # Описание видео БОЛЬШЕ текста записи (ТЗ 2026-08-10): в каталоге VK оно свёрнуто,
+    # значит место под поисковые фразы и теги бесплатное, а запись остаётся короткой.
+    description = build_release_video_description(
+        settings.post, album.artist, album.title, settings.post.album_kind, tracklist
+    )
+    attachment = vk.upload_video(video_path, title, description)
     vk.post_now(message, attachment)
     queue.log_post(POST_KIND_ALBUM)
 
@@ -212,10 +233,16 @@ def _continue_album(
     artist = track.artist or album.artist
     title = build_release_header(settings.post, artist, track.title, settings.post.track_kind)
     message = build_release_text(settings.post, artist, track.title, settings.post.track_kind)
+    description = build_release_video_description(
+        settings.post, artist, track.title, settings.post.track_kind
+    )
     video_path = Path(track.audio_path).with_name(f"track_{track.position:03d}.mp4")
     try:
-        render_track_video(Path(track.audio_path), Path(track.cover_path), video_path)
-        attachment = vk.upload_video(video_path, title, message)
+        render_track_video(
+            Path(track.audio_path), Path(track.cover_path), video_path,
+            caption=_track_caption(artist, track.title),
+        )
+        attachment = vk.upload_video(video_path, title, description)
         vk.post_now(message, attachment)
     except VKTokenBusy as exc:
         # Занятый пул — не вина трека: попытку не тратим, файлы не выбрасываем, просто

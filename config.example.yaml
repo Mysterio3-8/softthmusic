@@ -64,7 +64,7 @@ soundcloud:
     flag: "🎧"
     title_suffix: "Без цензуры"
     listen_label: "♾️ Слушать в Telegram бесплатно и без цензуры:"
-    listen_url: "https://t.me/tgram_music_bot"
+    listen_url: "https://t.me/muz_damn_bot"
     channel_label: "📢 Канал:"
     channel_url: ""
     # «{artist}_{name}» — свой тег каждому треку и альбому;
@@ -74,17 +74,64 @@ soundcloud:
     hashtag_group: ""
     track_kind: "Single"
     album_kind: "Album"
+    # --- SEO (ТЗ 2026-08-10) ---
+    # base_tags/search_phrases пустые → прежнее поведение: один тег, без поисковых фраз.
+    base_tags:
+      - "музыка"
+      - "новинкимузыки"
+      - "слушатьонлайн"
+      - "плейлист"
+    search_phrases:
+      - "{q} слушать онлайн"
+      - "{q} скачать бесплатно"
+      - "{q} музыка"
+    post_tag_limit: 6
+    video_tag_limit: 16
+    # Блок про сервис в конце ОПИСАНИЯ ВИДЕО (не записи): внешняя ссылка на бота.
+    service_block: |
+      ━━━━━━━━━━━━━━━━
+      ♾️ Infinity Music — вся музыка прямо в Telegram
+      📲 Открыть бота: https://t.me/tgram_music_bot
+      ━━━━━━━━━━━━━━━━
+
+# Сборники-плейлисты с YouTube / YouTube Music. Готовые пользовательские плейлисты
+# качаются потреково, на первые 10 секунд каждого трека ложится подпись
+# «исполнитель — название», всё склеивается в один ролик. Файл остаётся в ready/ и
+# уходит владельцу для заливки на YouTube, в VK публикуется автоматически.
+youtube_playlists:
+  enabled: false          # включить, когда заполните sources
+  sources:                # ссылка на плейлист или поисковый запрос по плейлистам
+    - "популярная музыка сборник"
+  discover_limit: 20
+  max_tracks: 15          # ffmpeg рендерит видео на КАЖДЫЙ трек — больше не успеть
+  max_posts_per_day: 2    # свой счётчик, не общий с треками
+  min_interval_minutes: 420
+  max_interval_minutes: 620
+  quiet_start_hour: 0
+  quiet_end_hour: 0
+  max_attempts: 3
+  work_dir: downloads/yt_playlists
+  ready_dir: ready        # готовые файлы для заливки на YouTube
+  ready_keep_days: 5
+  remote_host: "news-rewriter-vps"
+  header: "♾️ Плейлисты от Infinity Music"
+  playlist_description: |
+    Сборник собран вручную: только целые треки, без обрезок и без рекламы внутри.
+    Тайминги ниже — жми на нужное время, чтобы перейти к треку.
+  title_templates:
+    - "Плейлист {year}: музыка на каждый день"
+    - "Сборник треков {year} — слушать подряд"
 
 ad_block: |
   ━━━━━━━━━━━━━━━━
   🎧 Вся музыка — прямо в Telegram
 
-  🤖 @tgram_music_bot найдёт и пришлёт любой трек за секунды:
+  🤖 @muz_damn_bot найдёт и пришлёт любой трек за секунды:
   🔎 поиск по названию или строчке из песни
   ⬇️ скачивание в один тап
   🎼 плейлисты, новинки и минусовки
 
-  📲 Открыть бота: https://t.me/tgram_music_bot
+  📲 Открыть бота: https://t.me/muz_damn_bot
   📢 Новинки и подборки: https://t.me/tgramuzuka
   ━━━━━━━━━━━━━━━━
 

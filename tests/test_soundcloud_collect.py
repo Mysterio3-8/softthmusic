@@ -112,6 +112,11 @@ def test_busy_token_does_not_burn_track_attempts(tmp_path, monkeypatch):
     monkeypatch.setattr(album_publisher, "render_track_video", lambda *a, **k: None)
     monkeypatch.setattr(album_publisher, "build_release_header", lambda *a, **k: "h")
     monkeypatch.setattr(album_publisher, "build_release_text", lambda *a, **k: "t")
+    # Тест про поведение при занятом пуле, а не про тексты: описание видео заглушаем
+    # так же, как и остальные сборщики (появилось вместе с SEO 2026-08-10).
+    monkeypatch.setattr(
+        album_publisher, "build_release_video_description", lambda *a, **k: "d"
+    )
 
     class _VK:
         def pool_is_busy(self):

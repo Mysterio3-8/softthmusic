@@ -17,12 +17,19 @@ cp "$REMOTE_DIR/deploy/tg-sc-publisher.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now tg-sc-publisher.timer
 
+echo "==> Юниты потока сборников с YouTube..."
+cp "$REMOTE_DIR/deploy/tg-yt-playlists.service" /etc/systemd/system/
+cp "$REMOTE_DIR/deploy/tg-yt-playlists.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now tg-yt-playlists.timer
+
 echo "==> Отключение YouTube-потока (решение владельца: альбомы вместо роликов)..."
 systemctl disable --now yt-vk-publisher.timer 2>/dev/null || echo "   таймер уже выключен"
 
 echo "==> Состояние:"
 systemctl is-active tg-sc-publisher.timer
-systemctl list-timers --all | grep -E 'tg-sc|yt-vk' || true
+systemctl is-active tg-yt-playlists.timer
+systemctl list-timers --all | grep -E 'tg-sc|tg-yt|yt-vk' || true
 
 echo
 echo "Осталось руками:"

@@ -47,7 +47,7 @@ def _config(tmp_path, **overrides) -> Config:
             flag="🎧",
             title_suffix="Без цензуры",
             listen_label="♾️ Слушать в Telegram бесплатно и без цензуры:",
-            listen_url="https://t.me/tgram_music_bot",
+            listen_url="https://t.me/muz_damn_bot",
             channel_label="📢 Канал:",
             channel_url="",
             hashtag_template="{artist}_{name}",
@@ -109,7 +109,10 @@ def test_yesterdays_posts_do_not_count_against_the_limit(tmp_path, queue):
     vk, notifier = FakeVK(), FakeNotifier()
 
     # Тик через двое суток: вчерашний пост уже вне окна, лимит снова свободен.
-    outcome = tick(config, queue, vk, notifier, datetime.now() + timedelta(days=2))
+    # Час фиксируем: у конфига ночная пауза 23-9, и без этого тест падал «ночной паузой»
+    # ровно тогда, когда его запускали ночью.
+    moment = (datetime.now() + timedelta(days=2)).replace(hour=12, minute=0)
+    outcome = tick(config, queue, vk, notifier, moment)
 
     assert outcome == "очередь пуста"
 
