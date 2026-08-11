@@ -40,6 +40,7 @@ from app.soundcloud import (
     download_track,
 )
 from app.track_naming import split_artist_title
+from app.workdir_cleanup import cleanup_stale_workdirs
 from app.vk_client import VKClient, VKError, VKTokenBusy
 
 POST_KIND_ALBUM = "album"
@@ -71,6 +72,11 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
     refill(config, queue)
 
     album = queue.active_album()
+    # Каталоги альбомов, брошенных убитым процессом (OOM), не удалит никто: следующий
+    # тик работает под НОВЫМ id и о старом каталоге не знает. Активный не трогаем.
+    cleanup_stale_workdirs(
+        settings.work_dir, keep=settings.work_dir / f"album_{album.id}" if album else None
+    )
     if album is not None:
         return _continue_album(config, queue, vk, notifier, album, now)
 

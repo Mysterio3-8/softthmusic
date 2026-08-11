@@ -35,6 +35,7 @@ from app.seo import build_hashtags, build_search_line
 from app.soundcloud import Track
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
+from app.workdir_cleanup import cleanup_stale_workdirs
 from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
 from app.yt_source import YouTubeSourceError, discover_playlists, download_playlist
 
@@ -169,6 +170,9 @@ def _process(
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         cleanup_ready(settings.ready_dir, settings.ready_keep_days)
+        # Каталоги сборников, брошенных убитым процессом (OOM во время рендера), свой
+        # `finally` не отработали и лежат мёртвым грузом по сотне мегабайт каждый.
+        cleanup_stale_workdirs(settings.work_dir, keep=work_dir)
 
 
 def build_compilation(
