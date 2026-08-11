@@ -151,7 +151,11 @@ def _process(
         attachment = vk.upload_video(video_path, compilation.title, compilation.description)
         post_id = vk.post_now(compilation.post_text, attachment)
         posts.log_post(POST_KIND_YT_PLAYLIST)
-        playlists.mark_published(playlist.id, f"https://vk.com/wall-{config.group_id}_{post_id}")
+        playlists.mark_published(
+            playlist.id,
+            f"https://vk.com/wall-{config.group_id}_{post_id}",
+            published_title=compilation.title,
+        )
         return f"опубликован сборник «{compilation.title}» ({len(compilation.tracks)} треков)"
     except VKTokenBusy as exc:
         # НЕ поломка: свободного токена нет прямо сейчас. Попытку не тратим и файлы не
@@ -179,7 +183,9 @@ def build_compilation(
     tracks = download_playlist(playlist.url, work_dir, settings.max_tracks)
     _ensure_own_covers(tracks)
 
-    title = build_title(settings.title_templates, playlists.recent_titles(10), now)
+    title = build_title(
+        settings.title_templates, playlists.recent_titles(20), now, playlist_artists(tracks, 3)
+    )
     video_path = _render(tracks, work_dir)
     tracklist = build_tracklist(
         [f"{track.artist} — {track.title}" if track.artist else track.title for track in tracks],
@@ -194,12 +200,35 @@ def build_compilation(
     )
 
 
-def build_title(templates: list[str], recent: list[str], now: datetime) -> str:
+def build_title(
+    templates: list[str], recent: list[str], now: datetime, artists: list[str] | None = None
+) -> str:
     """Название собирается с нуля — название донора не берётся даже частично, чтобы
-    в сообщество не утёк чужой брендинг. Уже использованные недавно не повторяем."""
+    в сообщество не утёк чужой брендинг.
+
+    Жалоба владельца 2026-08-11: «у плейлистов одинаковые название одни и те же»,
+    «надо более кликабельные, больше байта, без цензуры можно добавить». Отсюда две
+    вещи:
+
+    * `{artists}` — имена исполнителей ИЗ САМОГО сборника. Это и байт (по ним кликают),
+      и SEO (их реально ищут), и главное — естественная уникальность: два сборника с
+      одинаковым набором первых трёх артистов почти невозможны, поэтому названия
+      перестают повторяться сами собой, а не по остаточному принципу.
+    * шаблоны без `{artists}` остаются запасом на случай, когда исполнителей не
+      разобрали (плейлист из роликов без имени артиста в названии).
+
+    Уже использованные недавно варианты не берём; все заняты — берём любой, потому что
+    сборник без названия хуже, чем сборник с повторным."""
     if not templates:
-        return f"Плейлист {now.year}"
-    variants = [template.format(year=now.year) for template in templates]
+        return f"Музыка без цензуры {now.year}"
+    names = ", ".join(artists or [])
+    variants = [
+        template.format(year=now.year, artists=names)
+        for template in templates
+        if names or "{artists}" not in template
+    ]
+    if not variants:  # все шаблоны требуют исполнителей, а их не разобрали
+        return f"Музыка без цензуры {now.year}"
     unused = [variant for variant in variants if variant not in recent]
     return random.choice(unused or variants)
 
@@ -252,7 +281,7 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
         f"{settings.header}\n{title}".strip(),
         settings.playlist_description.strip(),
         tracklist,
-        build_search_line(artists, style.search_phrases),
+        build_search_line(artists, style.search_phrases, style.channel_phrases),
         style.service_block,
         " ".join(
             build_hashtags(

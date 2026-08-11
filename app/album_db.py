@@ -37,6 +37,12 @@ class AlbumRow:
     tracks_total: int
     next_post_at: datetime | None
     chat_id: int | None
+    skip_compilation: bool = False
+    """Публиковать только треки, без склейки-сборника.
+
+    Так помечены находки автопоиска (`sc_autofill`): это ОДИН популярный трек, а
+    «сборник из одного трека» опубликовал бы одно и то же аудио дважды. У плейлистов,
+    поставленных руками, поведение прежнее — сборник, затем треки."""
 
 
 @dataclass
@@ -99,6 +105,13 @@ class AlbumQueue:
             );
             """
         )
+        # Самолечащаяся миграция: колонка добавлена вместе с автопоиском, у прод-БД её
+        # нет. Alembic ради одной колонки в очереди на 200 строк не окупается.
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(albums)")}
+        if "skip_compilation" not in columns:
+            self._conn.execute(
+                "ALTER TABLE albums ADD COLUMN skip_compilation INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def log_post(self, kind: str) -> None:
@@ -145,16 +158,44 @@ class AlbumQueue:
         ).fetchone()
         return datetime.fromisoformat(row["created_at"]) if row else None
 
-    def enqueue(self, url: str, title: str, artist: str, tracks_total: int, chat_id: int | None) -> int:
+    def enqueue(
+        self,
+        url: str,
+        title: str,
+        artist: str,
+        tracks_total: int,
+        chat_id: int | None,
+        skip_compilation: bool = False,
+    ) -> int:
         cursor = self._conn.execute(
             """
-            INSERT INTO albums (url, title, artist, status, tracks_total, chat_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO albums
+                (url, title, artist, status, tracks_total, chat_id, created_at, skip_compilation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (url, title, artist, ALBUM_PENDING, tracks_total, chat_id, _now_iso()),
+            (
+                url, title, artist, ALBUM_PENDING, tracks_total, chat_id, _now_iso(),
+                int(skip_compilation),
+            ),
         )
         self._conn.commit()
         return int(cursor.lastrowid)
+
+    def known_urls(self) -> set[str]:
+        """Все ссылки, когда-либо попадавшие в очередь — ключ дедупа автопоиска.
+
+        Считаем ВСЕ статусы, включая done и failed: повторно публиковать уже вышедший
+        трек нельзя, а упавший второй раз упадёт так же."""
+        rows = self._conn.execute("SELECT url FROM albums").fetchall()
+        return {row["url"] for row in rows}
+
+    def known_names(self) -> set[str]:
+        """Пары «исполнитель название» из очереди — второй ключ дедупа.
+
+        Один и тот же хит лежит на SoundCloud десятками перезаливов с разными
+        ссылками, и без этого ключа очередь набивалась бы копиями одного трека."""
+        rows = self._conn.execute("SELECT artist, title FROM albums").fetchall()
+        return {f"{row['artist']} {row['title']}".strip() for row in rows}
 
     def active_album(self) -> AlbumRow | None:
         """Альбом, который сейчас в работе. Их всегда не больше одного."""
@@ -289,6 +330,7 @@ def _to_album(row: sqlite3.Row) -> AlbumRow:
         tracks_total=row["tracks_total"],
         next_post_at=datetime.fromisoformat(raw_next) if raw_next else None,
         chat_id=row["chat_id"],
+        skip_compilation=bool(row["skip_compilation"]),
     )
 
 

@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -20,21 +19,16 @@ import yt_dlp
 from app.logger import get_logger
 from app.soundcloud import Track
 
+# Разбор «Артист — Песня» вынесен в общий модуль: та же задача стоит и у находок
+# SoundCloud, где uploader — паблик-перезаливщик, а не исполнитель.
+from app.track_naming import clean_artist, clean_title, split_artist_title  # noqa: F401
+
 _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
 # Фильтр выдачи YouTube «только плейлисты» (sp=EgIQAw%3D%3D). Обычный ytsearch ищет
 # ВИДЕО, а владельцу нужны «уже готовые пользовательские плейлисты» — это разные
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
-
-# «Big Baby Tape - Topic» — служебный канал автогенерённых аудиодорожек YouTube Music.
-# В подпись такое имя ставить нельзя, а исполнитель в нём как раз правильный.
-_TOPIC_SUFFIX = re.compile(r"\s*-\s*Topic\s*$", re.IGNORECASE)
-# Хвосты в названии ролика, которые в подписи и в теге только мешают.
-_TITLE_NOISE = re.compile(
-    r"\s*[\(\[](?:[^)\]]*)(?:official|lyric|audio|video|hd|4k|remaster\w*)[^)\]]*[\)\]]",
-    re.IGNORECASE,
-)
 
 MAX_TRACKS_DEFAULT = 15
 """Сколько треков берём из одного плейлиста.
@@ -114,30 +108,6 @@ def discover_playlists(source: str, limit: int = 20) -> list[PlaylistRef]:
             )
         )
     return refs
-
-
-def clean_artist(raw: str) -> str:
-    """«Big Baby Tape - Topic» → «Big Baby Tape»."""
-    return _TOPIC_SUFFIX.sub("", (raw or "").strip()).strip()
-
-
-def clean_title(raw: str) -> str:
-    """«Песня (Official Video)» → «Песня». Скобки без служебных слов не трогаем."""
-    return " ".join(_TITLE_NOISE.sub("", (raw or "").strip()).split())
-
-
-def split_artist_title(title: str, uploader: str) -> tuple[str, str]:
-    """Достаёт исполнителя и название из «Артист — Песня».
-
-    У пользовательских плейлистов исполнитель почти всегда зашит в НАЗВАНИЕ ролика,
-    а канал-загрузчик — это чужой паблик, а не автор трека. Разделителя нет — берём
-    исполнителя из канала (для «- Topic» это верный ответ)."""
-    cleaned = clean_title(title)
-    for separator in (" — ", " – ", " - ", " | "):
-        artist, found, name = cleaned.partition(separator)
-        if found and artist.strip() and name.strip():
-            return artist.strip(), name.strip()
-    return clean_artist(uploader), cleaned
 
 
 def download_playlist(

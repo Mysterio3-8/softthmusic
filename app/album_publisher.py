@@ -31,7 +31,15 @@ from app.post_builder import (
     build_release_video_description,
     build_tracklist,
 )
-from app.soundcloud import SoundCloudError, Track, covers_are_identical, download_playlist
+from app.sc_autofill import refill
+from app.soundcloud import (
+    SoundCloudError,
+    Track,
+    covers_are_identical,
+    download_playlist,
+    download_track,
+)
+from app.track_naming import split_artist_title
 from app.vk_client import VKClient, VKError, VKTokenBusy
 
 POST_KIND_ALBUM = "album"
@@ -55,6 +63,12 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
     # ветке треков, и плейлист, брошенный под утро, публиковался в 06:00.
     if is_quiet_hour(now, settings.quiet_start_hour, settings.quiet_end_hour):
         return "ночная пауза"
+
+    # Очередь на исходе — идём искать популярное сами (ТЗ 2026-08-10). Добор идёт ДО
+    # ветвления и не ждёт полного опустошения: поиск ходит в сеть, и пустая очередь,
+    # совпавшая с недоступностью SoundCloud, оставила бы сообщество без треков на сутки.
+    # Пока автопоиск выключен в конфиге, refill возвращает 0 и поведение ровно прежнее.
+    refill(config, queue)
 
     album = queue.active_album()
     if album is not None:
@@ -84,6 +98,9 @@ def _start_album(
     queue.set_album_status(album.id, ALBUM_DOWNLOADING)
 
     try:
+        if album.skip_compilation:
+            return _start_single(config, queue, album, work_dir, now)
+
         tracks = download_playlist(album.url, work_dir)
         _ensure_own_covers(tracks)
         _store_tracks(queue, album.id, tracks)
@@ -121,6 +138,51 @@ def _start_album(
         shutil.rmtree(work_dir, ignore_errors=True)
         notifier.send(f"❌ Альбом «{album.title}» не удалось обработать:\n{exc}", album.chat_id)
         return f"альбом {album.id} провален"
+
+
+def _start_single(
+    config: Config, queue: AlbumQueue, album: AlbumRow, work_dir: Path, now: datetime
+) -> str:
+    """Находка автопоиска: скачать один трек и поставить его в очередь публикации.
+
+    Сборник не публикуется — это один трек, а не релиз (см. `AlbumRow.skip_compilation`).
+    Токен пула здесь не трогаем вообще: скачивание в VK не ходит, а сам трек уйдёт
+    обычной веткой `_continue_album`, которая пул и проверяет.
+
+    Момент публикации отсчитывается от ПОСЛЕДНЕГО трека в сообществе, а не от «сейчас»:
+    у каждой такой находки свой альбом из одного трека, и отсчёт от начала альбома
+    выпустил бы два трека подряд — интервал между ними схлопнулся бы в ноль."""
+    settings = config.soundcloud
+    track = download_track(album.url, work_dir)
+    if track.cover_path is None:
+        raise MediaError("У трека нет обложки — нечего показывать в видео")
+
+    # У находки поиска `uploader` — это ПАБЛИК-перезаливщик («Русский Рэп»), а настоящий
+    # исполнитель зашит в название («TARAS - Тебя Нежно Грубо»). Без разбора и заголовок
+    # поста, и теги, и поисковые ключи ушли бы на чужое имя (замер 2026-08-11).
+    track.artist, track.title = split_artist_title(track.title, track.artist)
+
+    _store_tracks(queue, album.id, [track])
+    queue.set_album_meta(album.id, track.title or album.title, track.artist or album.artist, 1)
+    queue.set_album_status(album.id, ALBUM_PUBLISHING)
+
+    last = queue.last_post_at(POST_KIND_TRACK)
+    if last is None:
+        moment = now
+    else:
+        moment = next_publish_moment(
+            to_msk(last),
+            settings.min_interval_minutes,
+            settings.max_interval_minutes,
+            settings.quiet_start_hour,
+            settings.quiet_end_hour,
+        )
+    queue.set_next_post_at(album.id, moment)
+    get_logger().info(
+        "Трек «%s — %s» скачан, публикация примерно %s",
+        track.artist, track.title, f"{moment:%d.%m %H:%M}",
+    )
+    return f"трек альбома {album.id} скачан, публикация {moment:%d.%m %H:%M}"
 
 
 def _store_tracks(queue: AlbumQueue, album_id: int, tracks: list[Track]) -> None:
@@ -281,6 +343,11 @@ def _finish_album(
     """Треки кончились: чистим файлы, уведомляем, освобождаем конвейер."""
     queue.set_album_status(album.id, ALBUM_DONE)
     shutil.rmtree(config.soundcloud.work_dir / f"album_{album.id}", ignore_errors=True)
+
+    if album.skip_compilation:
+        # Находка автопоиска — это один трек. Отчёт «альбом опубликован полностью»
+        # на каждый такой трек превратил бы уведомления в спам: их два в сутки.
+        return f"альбом {album.id} завершён"
 
     waiting = queue.pending_count()
     tail = f"\nВ очереди ещё альбомов: {waiting}." if waiting else "\nОчередь пуста — кидай следующую ссылку."

@@ -70,6 +70,8 @@ class PlaylistQueue:
         existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(yt_playlists)")}
         if "delivered_at" not in existing:
             self._conn.execute("ALTER TABLE yt_playlists ADD COLUMN delivered_at TEXT")
+        if "published_title" not in existing:
+            self._conn.execute("ALTER TABLE yt_playlists ADD COLUMN published_title TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -104,10 +106,17 @@ class PlaylistQueue:
         )
         self._conn.commit()
 
-    def mark_published(self, playlist_id: int, post_url: str) -> None:
+    def mark_published(self, playlist_id: int, post_url: str, published_title: str = "") -> None:
+        """`published_title` — НАШЕ название сборника, а не название плейлиста-донора.
+
+        Раньше не сохранялось вовсе, и защита от повторов (`recent_titles`) сравнивала
+        свежесобранное название с названиями ДОНОРОВ — совпасть они не могли никогда,
+        поэтому повторов ничто не мешало. Ровно это владелец и увидел 2026-08-11:
+        «у плейлистов одинаковые название одни и те же»."""
         self._conn.execute(
-            "UPDATE yt_playlists SET status = ?, published_at = ?, post_url = ? WHERE id = ?",
-            (PLAYLIST_DONE, _now_iso(), post_url, playlist_id),
+            "UPDATE yt_playlists SET status = ?, published_at = ?, post_url = ?, "
+            "published_title = ? WHERE id = ?",
+            (PLAYLIST_DONE, _now_iso(), post_url, published_title, playlist_id),
         )
         self._conn.commit()
 
@@ -130,13 +139,14 @@ class PlaylistQueue:
         return attempts
 
     def recent_titles(self, limit: int) -> list[str]:
-        """Заголовки последних опубликованных сборников — чтобы не повторять шаблон."""
+        """НАШИ названия последних опубликованных сборников — чтобы их не повторять."""
         rows = self._conn.execute(
-            "SELECT title FROM yt_playlists WHERE status = ? "
+            "SELECT published_title FROM yt_playlists "
+            "WHERE status = ? AND published_title IS NOT NULL AND published_title != '' "
             "ORDER BY published_at DESC LIMIT ?",
             (PLAYLIST_DONE, limit),
         ).fetchall()
-        return [row["title"] for row in rows]
+        return [row["published_title"] for row in rows]
 
 
 def _to_row(row: sqlite3.Row) -> PlaylistRow:

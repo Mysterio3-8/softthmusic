@@ -59,6 +59,7 @@ def test_busy_token_returns_album_to_queue(tmp_path, monkeypatch):
         title = "T"
         artist = "A"
         chat_id = None
+        skip_compilation = False  # плейлист от владельца, а не находка автопоиска
 
     work_dir = tmp_path / "album_1"
     work_dir.mkdir()

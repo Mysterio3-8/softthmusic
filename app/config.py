@@ -36,11 +36,34 @@ class PostStyle:
     # поисковых фраз, то есть новые поля ничего не ломают у существующего конфига.
     base_tags: list[str] = field(default_factory=list)
     search_phrases: list[str] = field(default_factory=list)
+    channel_phrases: list[str] = field(default_factory=list)
+    """Постоянные запросы сообщества («музыка без цензуры», «инфинити музыка»).
+    В отличие от search_phrases не зависят от артиста и идут в КАЖДОЙ публикации —
+    ТЗ владельца 2026-08-11: по ним ищут чаще, чем по имени исполнителя."""
     post_tag_limit: int = 6
     video_tag_limit: int = 16
     service_block: str = ""
     """Блок «что это за сервис» в конце описания видео: ссылка на бота и на канал.
     Он и есть та внешняя ссылка, ради которой всё SEO затевалось."""
+
+
+@dataclass(frozen=True)
+class DiscoveryConfig:
+    """Автопоиск популярных треков на SoundCloud (ТЗ 2026-08-10).
+
+    enabled=False → очередь наполняется только руками, как было до автопоиска."""
+
+    enabled: bool = False
+    sources: list[str] = field(default_factory=list)
+    """Поисковые запросы (или прямые ссылки). Обходятся по порядку до набора нормы."""
+    min_queue: int = 3
+    """Ниже этого числа ожидающих треков запускается добор. Не «пусто» намеренно:
+    поиск ходит в сеть, и запас страхует от совпадения пустой очереди с отказом
+    SoundCloud."""
+    target_queue: int = 10
+    """До скольки треков доливаем за один добор."""
+    limit_per_source: int = 40
+    min_plays: int = 100_000
 
 
 @dataclass(frozen=True)
@@ -55,6 +78,7 @@ class SoundCloudConfig:
     max_track_attempts: int
     work_dir: Path
     post: PostStyle
+    discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
 
 
 @dataclass(frozen=True)
@@ -257,6 +281,24 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
         max_track_attempts=int(raw.get("max_track_attempts", 3)),
         work_dir=Path(raw.get("work_dir", "downloads/soundcloud")),
         post=_build_post_style(raw.get("post") or {}),
+        discovery=_build_discovery(raw.get("discovery") or {}),
+    )
+
+
+def _build_discovery(raw: dict) -> DiscoveryConfig:
+    min_queue = int(raw.get("min_queue", 3))
+    target_queue = int(raw.get("target_queue", 10))
+    if target_queue < min_queue:
+        raise ConfigError(
+            "soundcloud.discovery.target_queue меньше min_queue — добор не имел бы смысла"
+        )
+    return DiscoveryConfig(
+        enabled=bool(raw.get("enabled", False)),
+        sources=[str(item).strip() for item in (raw.get("sources") or []) if str(item).strip()],
+        min_queue=min_queue,
+        target_queue=target_queue,
+        limit_per_source=int(raw.get("limit_per_source", 40)),
+        min_plays=int(raw.get("min_plays", 100_000)),
     )
 
 
@@ -310,6 +352,7 @@ def _build_post_style(raw: dict) -> PostStyle:
         album_kind=str(raw.get("album_kind", "Album")),
         base_tags=[str(tag) for tag in (raw.get("base_tags") or [])],
         search_phrases=[str(phrase) for phrase in (raw.get("search_phrases") or [])],
+        channel_phrases=[str(phrase) for phrase in (raw.get("channel_phrases") or [])],
         post_tag_limit=int(raw.get("post_tag_limit", 6)),
         video_tag_limit=int(raw.get("video_tag_limit", 16)),
         service_block=str(raw.get("service_block", "")).strip(),

@@ -223,6 +223,31 @@ def test_title_falls_back_when_all_templates_used():
     assert build_title(["A {year}"], ["A 2026"], now) == "A 2026"
 
 
+def test_title_uses_artists_of_the_compilation():
+    """Жалоба 2026-08-11: «у плейлистов одинаковые название одни и те же».
+    Имена исполнителей из самого сборника делают названия и кликабельными, и разными."""
+    now = datetime(2026, 8, 10)
+
+    title = build_title(["{artists} — музыка без цензуры {year}"], [], now, ["Miyagi", "Скриптонит"])
+
+    assert title == "Miyagi, Скриптонит — музыка без цензуры 2026"
+
+
+def test_title_skips_artist_templates_when_artists_unknown():
+    """Плейлист из роликов без имени артиста в названии не должен дать «, — музыка»."""
+    now = datetime(2026, 8, 10)
+
+    title = build_title(["{artists} — микс", "Музыка без цензуры {year}"], [], now, [])
+
+    assert title == "Музыка без цензуры 2026"
+
+
+def test_title_has_safe_fallback_without_any_usable_template():
+    now = datetime(2026, 8, 10)
+
+    assert build_title(["{artists} — микс"], [], now, []) == "Музыка без цензуры 2026"
+
+
 def test_post_text_is_short_and_has_bot_link(tmp_path):
     config = _config(tmp_path)
     text = build_post_text(config, "Плейлист 2026", _tracks())

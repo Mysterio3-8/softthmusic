@@ -48,19 +48,30 @@ def build_hashtags(subjects: list[str], base_tags: list[str], group: str, limit:
     return tags
 
 
-def build_search_line(subjects: list[str], phrases: list[str]) -> str:
-    """«Big Baby Tape слушать онлайн · Big Baby Tape скачать бесплатно · …».
+def build_search_line(
+    subjects: list[str], phrases: list[str], channel_phrases: list[str] | None = None
+) -> str:
+    """«Big Baby Tape слушать онлайн · … · музыка без цензуры · инфинити мьюзик».
 
     Фразами, а не отдельными словами: поисковики ранжируют точное вхождение запроса
-    выше, чем совпадение слов вразнобой."""
-    if not subjects or not phrases:
-        return ""
+    выше, чем совпадение слов вразнобой.
+
+    Два сорта фраз, и путать их нельзя:
+
+    * `phrases` — шаблоны с `{q}` вокруг артиста и релиза. Приводят тех, кто ищет
+      конкретный трек, но работают только когда артист известен.
+    * `channel_phrases` — постоянные запросы САМОГО сообщества («музыка без цензуры»,
+      «инфинити музыка»). ТЗ владельца 2026-08-11: «чтобы люди писали музыка без цензуры
+      или инфинити музыка — и мой канал выходил». По ним ищут гораздо чаще, чем по имени
+      артиста, и они не зависят от того, разобрались ли метаданные, поэтому идут в КАЖДОЙ
+      публикации — в том числе там, где артист не определился и `phrases` пусты."""
     built = [
         template.format(q=subject)
         for subject in subjects
         if subject.strip()
         for template in phrases
     ]
+    built.extend(phrase for phrase in (channel_phrases or []) if phrase.strip())
     return " · ".join(dict.fromkeys(built))
 
 
@@ -74,6 +85,7 @@ def build_video_description(
     group: str,
     tag_limit: int,
     service_block: str = "",
+    channel_phrases: list[str] | None = None,
     limit: int = VK_VIDEO_DESCRIPTION_LIMIT,
 ) -> str:
     """Описание видеозаписи: шапка → треклист/текст → поисковые фразы → сервис → теги.
@@ -84,7 +96,7 @@ def build_video_description(
     blocks = [
         header.strip(),
         body.strip(),
-        build_search_line(subjects, phrases),
+        build_search_line(subjects, phrases, channel_phrases),
         service_block.strip(),
         " ".join(build_hashtags(subjects, base_tags, group, tag_limit)),
     ]

@@ -177,6 +177,48 @@ def download_playlist(url: str, target_dir: Path) -> list[Track]:
     return tracks
 
 
+def download_track(url: str, target_dir: Path) -> Track:
+    """Скачивает ОДИН трек по прямой ссылке. Позиция всегда 1.
+
+    Отдельная функция от `download_playlist`, а не флаг в ней: у одиночного трека нет
+    `playlist_index`, а шаблон имени файла плейлиста на нём построен. Пробовать угадать
+    имя общим шаблоном значит ловить «Ни один трек не скачался» на реально скачанном
+    mp3 — эта грабля в проекте уже оплачена (см. `_collect_tracks`)."""
+    ensure_client_id(url)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    options = {
+        "format": "bestaudio/best",
+        "outtmpl": str(target_dir / "%(id)s.%(ext)s"),
+        "writethumbnail": True,
+        "quiet": True,
+        "no_warnings": True,
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+        ],
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as exc:  # noqa: BLE001 — граница внешней библиотеки
+        raise SoundCloudError(f"Не удалось скачать трек: {exc}") from exc
+
+    if not info:
+        raise SoundCloudError("yt-dlp не вернул данные трека")
+
+    audio_path = target_dir / f"{info.get('id')}.mp3"
+    if not audio_path.exists():
+        raise SoundCloudError("Трек не скачался (возможно, DRM или приватная ссылка)")
+
+    return Track(
+        position=1,
+        title=(info.get("title") or "").strip(),
+        artist=(info.get("uploader") or info.get("artist") or "").strip(),
+        duration_s=int(info.get("duration") or 0),
+        audio_path=audio_path,
+        cover_path=_find_cover(target_dir, str(info.get("id"))),
+    )
+
+
 def _collect_tracks(entries: list, target_dir: Path) -> list[Track]:
     """Сопоставляет записи yt-dlp со скачанными файлами. Несошедшиеся — пропускает."""
     tracks: list[Track] = []

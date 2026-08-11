@@ -110,6 +110,7 @@ def build_release_video_description(
         group=style.hashtag_group,
         tag_limit=style.video_tag_limit,
         service_block=style.service_block,
+        channel_phrases=getattr(style, "channel_phrases", None),
     )
 
 
