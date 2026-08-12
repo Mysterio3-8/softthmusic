@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -29,6 +30,38 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 # ВИДЕО, а владельцу нужны «уже готовые пользовательские плейлисты» — это разные
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
+
+def ytdlp_base_options() -> dict:
+    """Общие опции yt-dlp для YouTube: cookies и внешний JS-движок.
+
+    🔴 Без cookies YouTube отвечает **«Sign in to confirm you're not a bot»** на КАЖДЫЙ
+    трек, и сборник падает с «Ни один трек не скачался». Ровно это остановило поток
+    сборников 2026-08-11: очередь была полна (46 плейлистов), таймер тикал, а
+    публикаций не было полтора суток. Проверка срабатывает на серверных IP — с
+    домашнего интернета того же кода не видно.
+
+    Путь к файлу — в `YT_COOKIES_FILE` (то же имя переменной, что у Новостей: софты
+    разные, но грабля одна, и держать для неё два имени незачем). Файл машинно-
+    специфичный, в git его нет и быть не должно.
+
+    `js_runtimes` — YouTube требует решать JS-челлендж подписи; без внешнего движка
+    yt-dlp его не проходит. Урок оплачен Минусами, здесь просто повторяем.
+
+    Файла нет → работаем без cookies, как раньше: часть плейлистов всё же скачается,
+    и это лучше, чем падать на старте."""
+    options: dict = {"quiet": True, "no_warnings": True, "js_runtimes": {"node": {}}}
+    cookies_path = os.environ.get("YT_COOKIES_FILE", "").strip()
+    if not cookies_path:
+        return options
+    if Path(cookies_path).exists():
+        options["cookiefile"] = cookies_path
+    else:
+        get_logger().warning(
+            "YT_COOKIES_FILE указывает на несуществующий файл: %s — идём без cookies",
+            cookies_path,
+        )
+    return options
+
 
 MAX_TRACKS_DEFAULT = 15
 """Сколько треков берём из одного плейлиста.
@@ -68,10 +101,9 @@ def discover_playlists(source: str, limit: int = 20) -> list[PlaylistRef]:
     по такой теме»."""
     url = build_source_url(source)
     options = {
+        **ytdlp_base_options(),
         "extract_flat": True,
         "skip_download": True,
-        "quiet": True,
-        "no_warnings": True,
         "ignoreerrors": True,
         "playlistend": limit,
     }
@@ -116,11 +148,10 @@ def download_playlist(
     """Треки плейлиста в mp3 с обложками. Порядок — как в плейлисте."""
     target_dir.mkdir(parents=True, exist_ok=True)
     options = {
+        **ytdlp_base_options(),
         "format": "bestaudio/best",
         "outtmpl": str(target_dir / "%(playlist_index)03d - %(id)s.%(ext)s"),
         "writethumbnail": True,
-        "quiet": True,
-        "no_warnings": True,
         "ignoreerrors": True,
         "playlistend": max_tracks,
         "postprocessors": [
