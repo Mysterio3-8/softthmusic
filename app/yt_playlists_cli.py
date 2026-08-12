@@ -25,6 +25,13 @@ from app.vk_client import VKClient, build_token_pool  # noqa: E402
 from app.yt_playlist_db import PlaylistQueue  # noqa: E402
 from app.yt_playlists import sync, tick  # noqa: E402
 
+RETRY_FAILED_AFTER_HOURS = 12
+"""Через сколько часов упавший плейлист можно попробовать снова.
+
+Меньше суток намеренно: сборников всего два в день, и ждать сутки значит потерять их
+оба. Двенадцать часов — достаточно, чтобы кончился кулдаун токена и разошлась нагрузка
+на память, но не настолько долго, чтобы сообщество простаивало."""
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="YouTube-плейлисты -> VK: сборники")
@@ -74,6 +81,15 @@ def _cmd_tick(config: Config, playlists: PlaylistQueue) -> int:
     # неправильное поведение по умолчанию.
     if playlists.pending_count() == 0:
         sync(config, playlists)
+        # Sync ничего не дал — поднимаем давно упавшие. Без этого очередь пустеет
+        # НАВСЕГДА: упавший плейлист остаётся в таблице, повторный sync его игнорирует
+        # (INSERT OR IGNORE по уникальному url), а выдача YouTube по тем же запросам
+        # приносит тот же набор ссылок. Причины падений почти всегда временные —
+        # занятый токен, OOM при рендере, оборванная закачка (см. revive_failed).
+        if playlists.pending_count() == 0:
+            revived = playlists.revive_failed(RETRY_FAILED_AFTER_HOURS)
+            if revived:
+                log.warning("Очередь сборников пуста — вернул в работу упавших: %d", revived)
 
     posts = AlbumQueue(config.database_path)
     vk = VKClient(

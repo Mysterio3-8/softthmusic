@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PLAYLIST_PENDING = "pending"
@@ -137,6 +137,30 @@ class PlaylistQueue:
             )
         self._conn.commit()
         return attempts
+
+    def revive_failed(self, older_than_hours: int) -> int:
+        """Вернуть в очередь давно упавшие плейлисты. Возвращает число возвращённых.
+
+        Зачем это вообще нужно. `add()` вставляет через INSERT OR IGNORE по уникальному
+        url, то есть **упавший плейлист остаётся в таблице навсегда** и повторным sync
+        уже не добавится. А поисковая выдача YouTube по одним и тем же запросам приносит
+        примерно один и тот же набор ссылок. Значит, стоит всем найденным плейлистам
+        один раз провалиться — и очередь пустеет НАВСЕГДА: sync исправно отвечает
+        «новых 0», тик исправно отвечает «очередь пуста», а сборники не выходят.
+        Ровно это владелец увидел 2026-08-12: последний сборник 11.08 в 01:19.
+
+        Почему это оправдано: причины падений почти всегда временные — занятый токен
+        пула, OOM во время рендера на 961 МБ, оборванная закачка. Плейлист, упавший
+        сутки назад, сегодня может собраться нормально. Счётчик попыток сбрасываем,
+        иначе он тут же снова упрётся в потолок."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+        cursor = self._conn.execute(
+            "UPDATE yt_playlists SET status = ?, attempts = 0 "
+            "WHERE status = ? AND created_at < ?",
+            (PLAYLIST_PENDING, PLAYLIST_FAILED, cutoff),
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def recent_titles(self, limit: int) -> list[str]:
         """НАШИ названия последних опубликованных сборников — чтобы их не повторять."""
