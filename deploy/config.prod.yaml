@@ -97,7 +97,7 @@ soundcloud:
     flag: "🎧"
     title_suffix: "Без цензуры"
     listen_label: "♾️ Слушать в Telegram бесплатно и без цензуры:"
-    listen_url: "https://t.me/tgram_music_bot"
+    listen_url: "https://t.me/muz_damn_bot"
     channel_label: "📢 Канал:"
     channel_url: ""
     # «{artist}_{name}» — свой тег каждому треку и альбому;
@@ -146,12 +146,12 @@ soundcloud:
       ━━━━━━━━━━━━━━━━
       ♾️ Infinity Music — вся музыка прямо в Telegram
 
-      🤖 @tgram_music_bot найдёт и пришлёт любой трек за секунды:
+      🤖 @muz_damn_bot найдёт и пришлёт любой трек за секунды:
       🔎 поиск по названию или строчке из песни
       ⬇️ скачивание в один тап
       🎼 плейлисты, новинки и минусовки
 
-      📲 Открыть бота: https://t.me/tgram_music_bot
+      📲 Открыть бота: https://t.me/muz_damn_bot
       📢 Новинки и подборки: https://t.me/tgramuzuka
       ━━━━━━━━━━━━━━━━
 
@@ -221,12 +221,12 @@ ad_block: |
   ━━━━━━━━━━━━━━━━
   🎧 Вся музыка — прямо в Telegram
 
-  🤖 @tgram_music_bot найдёт и пришлёт любой трек за секунды:
+  🤖 @muz_damn_bot найдёт и пришлёт любой трек за секунды:
   🔎 поиск по названию или строчке из песни
   ⬇️ скачивание в один тап
   🎼 плейлисты, новинки и минусовки
 
-  📲 Открыть бота: https://t.me/tgram_music_bot
+  📲 Открыть бота: https://t.me/muz_damn_bot
   📢 Новинки и подборки: https://t.me/tgramuzuka
   ━━━━━━━━━━━━━━━━
 
