@@ -19,8 +19,15 @@ TIMER="tg-sc-publisher.timer"
 # /etc/ssh/ssh_config и падает с «Could not resolve hostname news-rewriter-vps».
 # Хук post-commit работает именно в этой оболочке, поэтому «коммит = деплой» молча не
 # срабатывал (обнаружено 2026-08-11). Передаём конфиг явно, если он существует.
+# Явных -F/-o оказалось мало: путь к КЛЮЧУ msys тоже отдаёт в своей кодировке
+# (`/c/Users/\310\353\374\377/.ssh/id_ed25519`), файла по нему нет, и ssh падает уже на
+# «no such identity». Поэтому сначала пробуем ВИНДОВЫЙ ssh.exe — он читает те же конфиг
+# и known_hosts, но домашний каталог берёт из Windows и кириллицу переваривает.
+WIN_SSH="/c/Windows/System32/OpenSSH/ssh.exe"
 SSH=(ssh)
-if [ -f "$HOME/.ssh/config" ]; then
+if [ -x "$WIN_SSH" ]; then
+  SSH=("$WIN_SSH")
+elif [ -f "$HOME/.ssh/config" ]; then
   # known_hosts указываем тем же явным путём: иначе ssh ищет его по ненайденному
   # домашнему каталогу, не находит запись сервера и падает «Host key verification failed».
   SSH=(ssh -F "$HOME/.ssh/config" -o "UserKnownHostsFile=$HOME/.ssh/known_hosts")

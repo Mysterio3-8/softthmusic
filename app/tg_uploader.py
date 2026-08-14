@@ -17,8 +17,29 @@ import shutil
 from pathlib import Path
 
 from app.logger import get_logger
+from app.notifier import bot_username
 
 CAPTION_LIMIT = 1024
+
+
+def resolve_delivery_chat(config) -> int | str | None:
+    """Куда класть готовый сборник. Порядок жёсткий и не случайный:
+
+    1. `youtube_playlists.deliver_chat` — явное указание владельца, всегда сильнее;
+    2. **чат с ботом уведомлений** — файл ляжет рядом с текстом про этот же сборник.
+       Так и просил владелец: «файл и текст в одно место»;
+    3. свой `chat_id` — прежнее поведение, файл падает в «Избранное».
+
+    Пункт 3 остаётся именно запасным: без токена бота (или когда Telegram не ответил)
+    доставка обязана состояться хоть куда-то — файл на 130 МБ пересобирать дороже, чем
+    переслать его руками из «Избранного»."""
+    settings = config.youtube_playlists
+    if settings.deliver_chat:
+        return settings.deliver_chat
+    username = bot_username(config.telegram_bot_token)
+    if username:
+        return username
+    return config.telegram_admin_chat_id
 
 
 class TelegramUploader:
@@ -36,10 +57,7 @@ class TelegramUploader:
     def from_config(cls, config) -> "TelegramUploader | None":
         if not (config.tg_api_id and config.tg_api_hash and config.tg_session_name):
             return None
-        # deliver_chat перекрывает адресата: файл отдаётся ВАШЕЙ пользовательской
-        # сессией, поэтому по умолчанию (собственный chat_id) он падает в «Избранное».
-        # Хотите в чат с ботом — впишите «@muz_damn_bot» в config.yaml.
-        chat = config.youtube_playlists.deliver_chat or config.telegram_admin_chat_id
+        chat = resolve_delivery_chat(config)
         if not chat:
             return None
         return cls(
@@ -48,6 +66,12 @@ class TelegramUploader:
             session_name=config.tg_session_name,
             chat=chat,
         )
+
+    @property
+    def destination(self) -> str:
+        """Куда именно ушёл файл. Пишется владельцу в уведомлении: адресат зависит от
+        конфига и от ответа Telegram, и «отправлен» без места было бы полуответом."""
+        return str(self._chat)
 
     def send_file(self, path: Path, caption: str = "") -> bool:
         """True — файл ушёл. Ошибку наружу не пускаем: публикация в VK уже состоялась,

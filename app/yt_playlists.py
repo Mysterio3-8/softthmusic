@@ -330,6 +330,20 @@ def _ensure_own_covers(tracks: list[Track]) -> None:
         track.cover_path = own
 
 
+DELIVERY_CAPTION_MARKER = "#сборник"
+"""Метка в подписи файла: это ДОСТАВКА, а не просьба уникализировать.
+
+Файл уходит в чат с ботом уведомлений (чтобы лежал рядом с текстом про этот же сборник),
+а бот Новостей — тот же самый, и присланное владельцем видео он по умолчанию гонит через
+уникализатор. Метку он проверяет у себя (`control_bot.is_soft_delivery`); значение
+дублируется в двух репозиториях осознанно — общей библиотеки у софтов нет, а связывать их
+кодом ради одной строки дороже, чем держать её синхронной."""
+
+
+def build_delivery_caption(title: str) -> str:
+    return f"{DELIVERY_CAPTION_MARKER} {title}\n\nГотов к заливке на YouTube."
+
+
 def _deliver(
     config: Config,
     playlists: PlaylistQueue,
@@ -356,7 +370,7 @@ def _deliver(
             bot_token=config.telegram_bot_token,
             chat_id=config.telegram_admin_chat_id,
             remote_host=settings.remote_host,
-            caption=f"{compilation.title}\n\nГотов к заливке на YouTube.",
+            caption=build_delivery_caption(compilation.title),
             uploader=TelegramUploader.from_config(config),
         )
         playlists.mark_delivered(playlist.id)

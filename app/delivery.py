@@ -11,6 +11,11 @@
 Почему не «всегда в Telegram»: Bot API режет отдачу на 50 МБ, а сборник из 15 треков
 весит заметно больше. Обойти это можно только MTProto-сессией (Telethon) — это
 отдельный логин и отдельная зависимость, заводить её без спроса не стали.
+
+Адресат по умолчанию — ЧАТ С БОТОМ уведомлений (`tg_uploader.resolve_delivery_chat`),
+чтобы файл лежал рядом с текстом про этот же сборник. ТЗ владельца 2026-08-13: «файл и
+текст в одно место, сейчас разъезжается» — раньше текст слал бот, а файл уходил в
+«Избранное» пользовательской сессии.
 """
 from __future__ import annotations
 
@@ -59,7 +64,9 @@ def deliver(
     size_mb = stored.stat().st_size / 1e6
 
     if uploader is not None and uploader.send_file(stored, caption):
-        return DeliveryResult(stored, True, f"отправлен в Telegram ({size_mb:.0f} МБ)")
+        where = getattr(uploader, "destination", "")
+        target = f" → {where}" if where else ""
+        return DeliveryResult(stored, True, f"отправлен в Telegram ({size_mb:.0f} МБ){target}")
 
     if stored.stat().st_size <= BOT_API_FILE_LIMIT_BYTES and bot_token and chat_id:
         if _send_document(stored, bot_token, chat_id, caption):
