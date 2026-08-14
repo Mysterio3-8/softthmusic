@@ -32,6 +32,12 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
 
+PROXY_ENV = "YT_PROXY"
+"""Прокси для YouTube. Живой перебор VPN-выходов 2026-08-14 показал, что барьер
+«я не бот» зависит от IP, а не от куки: на шведском выходе форматы отдаются без куки
+вовсе, на остальных четырёх — барьер даже с куками. Через прокси ходит ТОЛЬКО yt-dlp:
+смена страны у запросов к VK — верный способ поймать проверку безопасности."""
+
 COOKIES_MASTER_ENV = "YT_COOKIES_MASTER"
 POT_SCRIPT_ENV = "YT_POT_SCRIPT"
 DEFAULT_POT_SCRIPT = "/opt/bgutil-pot/server/build/generate_once.js"
@@ -56,6 +62,10 @@ def ytdlp_base_options() -> dict:
     Файла нет → работаем без cookies, как раньше: часть плейлистов всё же скачается,
     и это лучше, чем падать на старте."""
     options: dict = {"quiet": True, "no_warnings": True, "js_runtimes": {"node": {}}}
+
+    proxy = os.environ.get(PROXY_ENV, "").strip()
+    if proxy:
+        options["proxy"] = proxy
 
     # PO-token: без него YouTube отдаёт ответ, но в нём ОДНИ РАСКАДРОВКИ — ни одного
     # медиа-потока, и yt-dlp честно говорит «формат недоступен». Куки эту часть не
