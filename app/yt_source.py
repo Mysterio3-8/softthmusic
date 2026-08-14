@@ -31,6 +31,10 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
 
+POT_SCRIPT_ENV = "YT_POT_SCRIPT"
+DEFAULT_POT_SCRIPT = "/opt/bgutil-pot/server/build/generate_once.js"
+
+
 def ytdlp_base_options() -> dict:
     """Общие опции yt-dlp для YouTube: cookies и внешний JS-движок.
 
@@ -50,6 +54,17 @@ def ytdlp_base_options() -> dict:
     Файла нет → работаем без cookies, как раньше: часть плейлистов всё же скачается,
     и это лучше, чем падать на старте."""
     options: dict = {"quiet": True, "no_warnings": True, "js_runtimes": {"node": {}}}
+
+    # PO-token: без него YouTube отдаёт ответ, но в нём ОДНИ РАСКАДРОВКИ — ни одного
+    # медиа-потока, и yt-dlp честно говорит «формат недоступен». Куки эту часть не
+    # закрывают: они снимают только проверку «я не бот» (разобрано живыми вызовами
+    # 2026-08-14 на Кино, у Музыки барьер тот же). Скрипта нет → идём как раньше.
+    pot_script = os.environ.get(POT_SCRIPT_ENV, DEFAULT_POT_SCRIPT).strip()
+    if pot_script and Path(pot_script).exists():
+        options["extractor_args"] = {
+            "youtubepot-bgutilscript": {"script_path": [pot_script]}
+        }
+
     cookies_path = os.environ.get("YT_COOKIES_FILE", "").strip()
     if not cookies_path:
         return options
