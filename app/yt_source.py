@@ -71,16 +71,16 @@ def ytdlp_base_options() -> dict:
     if not cookies_path:
         return options
 
-    # yt-dlp ПЕРЕЗАПИСЫВАЕТ выданный ему cookiefile своей банкой после сессии. Так на
-    # проде эталон похудел с 17 879 байт до 3 654 за один прогон, а прошлый файл этим же
-    # путём растерял `SID` и `LOGIN_INFO` — и выглядело это как «прислали плохие куки».
-    # Поэтому перед каждым вызовом восстанавливаем рабочую копию из эталона.
+    # Эталон разворачивается ТОЛЬКО когда рабочего файла нет. yt-dlp переписывает
+    # выданный ему cookiefile — и это не порча, а ротация: YouTube обновляет
+    # `__Secure-1PSIDTS`, и живёт именно свежая банка. Возврат эталона перед каждым
+    # вызовом откатывал бы ротацию и ронял авторизацию (проверено на Кино 2026-08-14).
     master = os.environ.get(COOKIES_MASTER_ENV, "").strip()
-    if master and Path(master).exists():
+    if master and Path(master).exists() and not Path(cookies_path).exists():
         try:
             shutil.copyfile(master, cookies_path)
         except OSError as error:
-            get_logger().warning("Не удалось обновить cookies из эталона %s: %s", master, error)
+            get_logger().warning("Не удалось восстановить cookies из эталона %s: %s", master, error)
 
     if Path(cookies_path).exists():
         options["cookiefile"] = cookies_path
