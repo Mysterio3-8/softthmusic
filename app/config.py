@@ -106,6 +106,11 @@ class YoutubePlaylistsConfig:
     header: str
     playlist_description: str
     title_templates: list[str]
+    post_promo: str = ""
+    """Промо-блок записи на стене. Пусто → заводской текст из yt_playlists.
+
+    Со значением по умолчанию, чтобы прежние вызовы конструктора (и тесты) не ломались:
+    поле добавлено позже остальных."""
 
 
 @dataclass
@@ -334,6 +339,7 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         deliver_chat=str(raw.get("deliver_chat", "")).strip(),
         header=str(raw.get("header", "♾️ Плейлисты от Infinity Music")),
         playlist_description=str(raw.get("playlist_description", "")),
+        post_promo=str(raw.get("post_promo", "")),
         title_templates=[str(item) for item in (raw.get("title_templates") or [])],
     )
 

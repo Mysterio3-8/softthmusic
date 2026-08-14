@@ -248,16 +248,27 @@ def test_title_has_safe_fallback_without_any_usable_template():
     assert build_title(["{artists} — микс"], [], now, []) == "Музыка без цензуры 2026"
 
 
-def test_post_text_is_short_and_has_bot_link(tmp_path):
-    config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", _tracks())
+def test_post_text_follows_owner_template(tmp_path):
+    """Шаблон записи задан владельцем дословно 2026-08-14: заголовок, промо, тайминги.
 
-    assert text.startswith("♾️ Плейлисты от Infinity Music\nПлейлист 2026")
-    assert "https://t.me/tgram_music_bot" in text
-    assert "Треков в сборнике: 2" in text
-    assert "#музыка@tgmusic" in text
-    # Тайминги в записи не идут — они уезжают в описание видео (ТЗ 2026-08-10).
-    assert "00:00" not in text
+    «Без лишних тегов и надписей» — поэтому в записи не должно остаться ни хештегов,
+    ни служебного заголовка потока, ни строки «Треков в сборнике»."""
+    config = _config(tmp_path)
+    text = build_post_text(config, "Плейлист 2026", _tracks(), "00:00 1. Ария — Штиль")
+
+    assert text.startswith("Плейлист 2026")
+    assert "https://t.me/muz_damn_bot" in text
+    assert "00:00 1. Ария — Штиль" in text
+    assert "#" not in text
+    assert "Треков в сборнике" not in text
+    assert "♾️ Плейлисты от Infinity Music" not in text
+
+
+def test_post_text_never_carries_the_dead_bot_link(tmp_path):
+    """`tgram_music_bot` не существует, а ссылка уезжала в публикации."""
+    config = _config(tmp_path)
+
+    assert "tgram_music_bot" not in build_post_text(config, "Плейлист", _tracks(), "00:00 1. Х")
 
 
 def test_invented_title_never_becomes_a_hashtag(tmp_path):
@@ -294,9 +305,13 @@ def test_description_has_timings_search_phrases_and_service(tmp_path):
     assert description.rstrip().splitlines()[-1].startswith("#")
 
 
-def test_description_is_bigger_than_post_text(tmp_path):
+def test_description_keeps_search_keys_out_of_the_post(tmp_path):
+    """Запись теперь длинная (тайминги в ней), поэтому сравнивать длины бессмысленно.
+    Важно другое: поисковые ключи и теги живут ТОЛЬКО в описании ролика — в ленте оно
+    свёрнуто, а запись владелец просил держать чистой."""
     config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", _tracks())
+    text = build_post_text(config, "Плейлист 2026", _tracks(), "00:00 1. Ария — Штиль")
     description = build_description(config, "Плейлист 2026", "00:00 1. Ария — Штиль", _tracks())
 
-    assert len(description) > len(text)
+    assert "#" in description
+    assert "#" not in text

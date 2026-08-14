@@ -198,7 +198,7 @@ def build_compilation(
     return Compilation(
         video_path=video_path,
         title=title,
-        post_text=build_post_text(config, title, tracks),
+        post_text=build_post_text(config, title, tracks, tracklist),
         description=build_description(config, title, tracklist, tracks),
         tracks=tracks,
     )
@@ -246,30 +246,42 @@ def playlist_artists(tracks: list[Track], limit: int = 8) -> list[str]:
     return list(dict.fromkeys(track.artist for track in tracks if track.artist))[:limit]
 
 
-def build_post_text(config: Config, title: str, tracks: list[Track]) -> str:
-    """Запись на стене — короткая: заголовок, сколько треков, ссылка, теги.
+BOT_USERNAME = "muz_damn_bot"
+"""⚠️ Рабочий бот Музыки. `tgram_music_bot` — НЕ он: эта ссылка ведёт в никуда и
+уезжала в публикации (владелец поправил 2026-08-14). Имя держим одной константой,
+чтобы правка была в одном месте, а не в промо-тексте, конфиге и документации порознь."""
 
-    Треклист с таймингами сюда НЕ идёт (ТЗ 2026-08-10: «в описание по таймингам»):
-    под записью он занял бы пол-экрана, а в описании видео он и полезнее, и не мешает."""
+DEFAULT_POST_PROMO = f"""♾️ Infinity Music — вся музыка прямо в Telegram
+
+🤖 @{BOT_USERNAME} найдёт и пришлёт любой трек за секунды:
+
+🔎 поиск по названию или строчке из песни
+
+⬇️ скачивание в один тап
+
+🎼 плейлисты, новинки и минусовки
+
+📲 Открыть бота: https://t.me/{BOT_USERNAME}"""
+"""Промо-блок записи. Текст задан владельцем дословно 2026-08-14 — правится в
+`youtube_playlists.post_promo`, здесь только заводское значение."""
+
+
+def build_post_text(
+    config: Config, title: str, tracks: list[Track], tracklist: str = ""
+) -> str:
+    """Запись на стене: заголовок, промо-блок, треклист с таймингами.
+
+    ТЗ владельца 2026-08-14 (шаблон прислан дословно): «без лишних тегов и надписей».
+    Поэтому из записи убраны хештеги, строка «Треков в сборнике» и служебный заголовок
+    потока — всё это лишь отодвигало вниз то, ради чего запись и открывают.
+
+    Треклист теперь идёт В ЗАПИСЬ, а не только в описание ролика. Прежний довод
+    (2026-08-10: «под записью он занял бы пол-экрана») владелец снял явно: тайминги
+    и есть главная ценность сборника. В описании ролика он тоже остаётся — это разные
+    индексируемые поля VK."""
     settings = config.youtube_playlists
-    style = config.soundcloud.post
-    links = [
-        f"{label} {url}".strip()
-        for label, url in (
-            (style.listen_label, style.listen_url),
-            (style.channel_label, style.channel_url),
-        )
-        if url
-    ]
-    tags = build_hashtags(
-        playlist_artists(tracks, 3), style.base_tags, style.hashtag_group, style.post_tag_limit
-    )
-    blocks = [
-        f"{settings.header}\n{title}".strip(),
-        f"🎵 Треков в сборнике: {len(tracks)}",
-        "\n".join(links),
-        " ".join(tags),
-    ]
+    promo = (settings.post_promo or DEFAULT_POST_PROMO).strip()
+    blocks = [title.strip(), promo, tracklist.strip()]
     return "\n\n".join(block for block in blocks if block.strip())
 
 

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -31,6 +32,7 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
 
+COOKIES_MASTER_ENV = "YT_COOKIES_MASTER"
 POT_SCRIPT_ENV = "YT_POT_SCRIPT"
 DEFAULT_POT_SCRIPT = "/opt/bgutil-pot/server/build/generate_once.js"
 
@@ -68,6 +70,18 @@ def ytdlp_base_options() -> dict:
     cookies_path = os.environ.get("YT_COOKIES_FILE", "").strip()
     if not cookies_path:
         return options
+
+    # yt-dlp ПЕРЕЗАПИСЫВАЕТ выданный ему cookiefile своей банкой после сессии. Так на
+    # проде эталон похудел с 17 879 байт до 3 654 за один прогон, а прошлый файл этим же
+    # путём растерял `SID` и `LOGIN_INFO` — и выглядело это как «прислали плохие куки».
+    # Поэтому перед каждым вызовом восстанавливаем рабочую копию из эталона.
+    master = os.environ.get(COOKIES_MASTER_ENV, "").strip()
+    if master and Path(master).exists():
+        try:
+            shutil.copyfile(master, cookies_path)
+        except OSError as error:
+            get_logger().warning("Не удалось обновить cookies из эталона %s: %s", master, error)
+
     if Path(cookies_path).exists():
         options["cookiefile"] = cookies_path
     else:
