@@ -375,6 +375,7 @@ def _deliver(
         get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
         return compilation.video_path
     try:
+        uploader = TelegramUploader.from_config(config)
         result = deliver(
             compilation.video_path,
             ready_dir=settings.ready_dir,
@@ -383,32 +384,23 @@ def _deliver(
             chat_id=config.telegram_admin_chat_id,
             remote_host=settings.remote_host,
             caption=build_delivery_caption(compilation.title),
-            uploader=TelegramUploader.from_config(config),
+            uploader=uploader,
         )
         playlists.mark_delivered(playlist.id)
-        # Описание идёт ТЕМ ЖЕ каналом, что и файл, и сразу за ним. Ботом оно приходило
-        # в другой диалог, и владелец видел «сборник пришёл, а описания к нему нет»
-        # (2026-08-15). Уведомление ботом остаётся запасным путём — на случай, когда
-        # MTProto недоступен и файл ушёл через ready/ + scp.
-        uploader = TelegramUploader.from_config(config)
         details = (
-            f"🎬 {compilation.title}
-"
-            f"Треков: {len(compilation.tracks)}
-
-"
-            f"Описание для YouTube:
-{compilation.description[:2500]}"
-        )
-        if not (result.sent_to_telegram and uploader is not None
-                and uploader.send_message(details)):
-            notifier.send(details)
-        notifier.send(
             f"🎬 Сборник «{compilation.title}» готов.\n"
             f"Треков: {len(compilation.tracks)}.\nФайл {result.message}\n"
             f"Публикую в VK.\n\n"
             f"Описание для YouTube:\n{compilation.description[:2500]}"
         )
+        # Текст идёт ТЕМ ЖЕ каналом, что и файл, и сразу за ним. Ботом он приходил в
+        # другой диалог, и владелец видел «сборник пришёл, а описания и названия к нему
+        # нет» (2026-08-15). Сообщение ОДНО: дублировать описание в двух местах значит
+        # заставлять владельца сверять, какое из них свежее.
+        # Бот остаётся запасным путём — когда MTProto недоступен и файл ушёл через scp.
+        if not (result.sent_to_telegram and uploader is not None
+                and uploader.send_message(details)):
+            notifier.send(details)
         return result.path
     except Exception as exc:  # noqa: BLE001 — отдача файла не должна ронять тик
         get_logger().warning("Не удалось отдать сборник владельцу: %s", exc)
