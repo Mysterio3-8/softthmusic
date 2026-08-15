@@ -386,6 +386,23 @@ def _deliver(
             uploader=TelegramUploader.from_config(config),
         )
         playlists.mark_delivered(playlist.id)
+        # Описание идёт ТЕМ ЖЕ каналом, что и файл, и сразу за ним. Ботом оно приходило
+        # в другой диалог, и владелец видел «сборник пришёл, а описания к нему нет»
+        # (2026-08-15). Уведомление ботом остаётся запасным путём — на случай, когда
+        # MTProto недоступен и файл ушёл через ready/ + scp.
+        uploader = TelegramUploader.from_config(config)
+        details = (
+            f"🎬 {compilation.title}
+"
+            f"Треков: {len(compilation.tracks)}
+
+"
+            f"Описание для YouTube:
+{compilation.description[:2500]}"
+        )
+        if not (result.sent_to_telegram and uploader is not None
+                and uploader.send_message(details)):
+            notifier.send(details)
         notifier.send(
             f"🎬 Сборник «{compilation.title}» готов.\n"
             f"Треков: {len(compilation.tracks)}.\nФайл {result.message}\n"

@@ -73,6 +73,36 @@ class TelegramUploader:
         конфига и от ответа Telegram, и «отправлен» без места было бы полуответом."""
         return str(self._chat)
 
+    def send_message(self, text: str) -> bool:
+        """Текст в ТОТ ЖЕ чат, что и файл.
+
+        Зачем не ботом: бот шлёт в свой диалог, а файл идёт пользовательской сессией — и
+        описание оказывалось оторванным от сборника. Владелец 2026-08-15: «сборник пришёл,
+        а описания и названия к нему нет». Одним каналом они лежат рядом."""
+        if not text.strip():
+            return False
+        try:
+            return asyncio.run(self._send_text(text))
+        except Exception:
+            get_logger().exception("MTProto: не удалось отправить текст сборника")
+            return False
+
+    async def _send_text(self, text: str) -> bool:
+        from telethon import TelegramClient
+
+        session = _own_session_path(self._session_name)
+        client = TelegramClient(str(session), self._api_id, self._api_hash)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                return False
+            # Telegram режет сообщение на 4096 символов — описание сборника длиннее не
+            # бывает, но обрезаем явно, чтобы отправка не падала на длинном треклисте.
+            await client.send_message(self._chat, text[:4000])
+            return True
+        finally:
+            await client.disconnect()
+
     def send_file(self, path: Path, caption: str = "") -> bool:
         """True — файл ушёл. Ошибку наружу не пускаем: публикация в VK уже состоялась,
         и провал доставки не должен её отменять."""
