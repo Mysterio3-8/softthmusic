@@ -57,6 +57,44 @@ def read_contract(project_dir: Path | str = ".") -> dict:
     }
 
 
+def read_sources(project_dir: Path | str = ".") -> dict:
+    """Источники из контракта: {"primary": [...], "secondary": [...]}."""
+    path = Path(project_dir) / CONTRACT_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    sources = data.get("sources") if isinstance(data, dict) else None
+    if not isinstance(sources, dict):
+        return {}
+    return {
+        key: [str(item) for item in value]
+        for key, value in sources.items()
+        if isinstance(value, list) and value
+    }
+
+
+def apply_sources(raw: dict, project_dir: Path | str = ".") -> dict:
+    """Источники контракта → конфиг. primary → треки SoundCloud, secondary → сборники.
+
+    Сопоставление делает софт, а не менеджер: контракт нейтрален и не знает, что у
+    Музыки два потока с разной ценой публикации."""
+    sources = read_sources(project_dir)
+    applied: dict = {}
+    if sources.get("primary"):
+        discovery = raw.setdefault("soundcloud", {}).setdefault("discovery", {})
+        discovery["sources"] = sources["primary"]
+        applied["soundcloud.discovery.sources"] = len(sources["primary"])
+    if sources.get("secondary"):
+        raw.setdefault("youtube_playlists", {})["sources"] = sources["secondary"]
+        applied["youtube_playlists.sources"] = len(sources["secondary"])
+    if applied:
+        get_logger().info("Источники из контракта: %s", applied)
+    return applied
+
+
 def apply_contract(raw: dict, project_dir: Path | str = ".") -> dict:
     """Наложить контракт на сырой конфиг ДО сборки Config. Возвращает применённое.
 
