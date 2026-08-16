@@ -33,8 +33,13 @@ _NOISE_WORDS = (
 
 _TITLE_NOISE = re.compile(rf"\s*[\(\[][^)\]]*(?:{_NOISE_WORDS})[^)\]]*[\)\]]", re.IGNORECASE)
 
-_TAIL_NOISE = re.compile(rf"\s*[|·/–—-]\s*[^|·]*(?:{_NOISE_WORDS})[^|·]*$", re.IGNORECASE)
-"""Хвост после разделителя: «Алая | Премьера трека», «… - prod by DRZ»."""
+_TAIL_NOISE = re.compile(rf"\s*[|·]\s*[^|·]{{0,60}}?(?:{_NOISE_WORDS})[^|·]*$", re.IGNORECASE)
+"""Хвост после вертикальной черты: «Алая | Премьера трека».
+
+⚠️ Дефис и тире сюда НЕ входят, хотя соблазн есть. Именно ими отделяют артиста от
+песни — «Егор Крид - MALO 2.0 (ft. …) КЛИП», — и правило с дефисом съедало НАЗВАНИЕ
+целиком, оставляя «Егор Крид — Егор Крид» (поймано живым прогоном 16.08). Мусор после
+дефиса убирают более узкие правила: `_PROD_TAIL` и `_BARE_NOISE`."""
 
 _BARE_NOISE = re.compile(
     rf"\s+(?:{_NOISE_WORDS})(?:\s+\d{{4}})?\s*$", re.IGNORECASE
@@ -96,9 +101,12 @@ def split_artist_title(title: str, uploader: str) -> tuple[str, str]:
 
     Разделителя нет — берём исполнителя из канала (для «- Topic» это верный ответ,
     а у альбома SoundCloud загрузчик и есть артист)."""
-    cleaned = clean_title(title)
+    # Делим СНАЧАЛА, чистим ПОТОМ. Обратный порядок стоил живой регрессии 16.08: чистка
+    # работает по всей строке и способна снести хвост вместе с названием песни, если
+    # артист отделён тем же дефисом, что и мусор.
+    raw = (title or "").strip()
     for separator in _SEPARATORS:
-        artist, found, name = cleaned.partition(separator)
-        if found and artist.strip() and name.strip():
-            return artist.strip(), name.strip()
-    return clean_artist(uploader), cleaned
+        artist, found, name = raw.partition(separator)
+        if found and artist.strip() and clean_title(name).strip():
+            return clean_artist(artist.strip()), clean_title(name)
+    return clean_artist(uploader), clean_title(raw)
