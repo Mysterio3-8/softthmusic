@@ -4,6 +4,8 @@
 диджей-миксов, сборник из них физически не собирался (13 часов видео, юнит убивало по
 таймауту на склейке), а владелец видел только «сборники не приходят».
 """
+from pathlib import Path
+
 import pytest
 
 from app.yt_playlist_db import PLAYLIST_PENDING, PLAYLIST_REJECTED, PlaylistQueue
@@ -187,3 +189,60 @@ def test_download_switches_exit_when_the_first_one_returns_nothing(tmp_path, mon
 
     assert tracks == ["трек"]
     assert used == ["socks5://127.0.0.1:10808", "socks5://127.0.0.1:10813"]
+
+
+def test_owner_gets_the_description_of_the_file_he_actually_received():
+    """🔴 Живая жалоба 16.08: в файле 8 треков, а в описании 15 с таймингами. Владелец
+    заливает этот файл на YouTube ВМЕСТЕ с описанием — половина таймингов вела бы в
+    пустоту, а последних семи треков в ролике не было бы вовсе."""
+    from app.yt_playlists import Compilation
+
+    comp = Compilation(
+        video_path=Path("full.mp4"),
+        title="Сборник",
+        post_text="пост",
+        description="полные 15 треков",
+        tracks=[],
+        delivery_path=Path("short.mp4"),
+        delivery_tracks=8,
+        delivery_description="первые 8 треков",
+    )
+
+    assert comp.description_for_owner == "первые 8 треков"
+    assert comp.description == "полные 15 треков"
+
+
+def test_without_truncation_the_owner_gets_the_same_description():
+    from app.yt_playlists import Compilation
+
+    comp = Compilation(
+        video_path=Path("full.mp4"),
+        title="Сборник",
+        post_text="пост",
+        description="все треки",
+        tracks=[],
+    )
+
+    assert comp.description_for_owner == "все треки"
+
+
+def test_search_phrases_become_hashtags_not_a_dotted_line():
+    """ТЗ владельца 2026-08-16: «делать только хэштегами»."""
+    from app.seo import build_search_tags
+
+    tags = build_search_tags(["Егор Крид"], ["{q} слушать онлайн"], ["музыка без цензуры"])
+
+    assert tags == ["#егор_крид_слушать_онлайн", "#музыка_без_цензуры"]
+
+
+def test_search_hashtags_are_capped():
+    """Пятнадцать артистов на четыре шаблона дают шестьдесят тегов — это спам."""
+    from app.seo import build_search_tags
+
+    tags = build_search_tags(
+        [f"Артист {i}" for i in range(20)],
+        ["{q} слушать", "{q} скачать", "{q} музыка"],
+        limit=10,
+    )
+
+    assert len(tags) == 10

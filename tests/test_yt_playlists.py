@@ -289,8 +289,10 @@ def test_search_phrases_are_built_from_artists_not_from_the_title(tmp_path):
         config, "Плейлист 2026", "00:00 1. Ария — Штиль", _tracks()
     )
 
-    assert "Ария слушать онлайн" in description
-    assert "Плейлист 2026 слушать онлайн" not in description
+    # ТЗ 2026-08-16: поисковые фразы идут ХЭШТЕГАМИ, а не строкой через точку —
+    # строка была просто текстом, по которому VK не даёт перехода.
+    assert "#ария_слушать_онлайн" in description
+    assert "плейлист_2026_слушать_онлайн" not in description
 
 
 def test_description_has_timings_search_phrases_and_service(tmp_path):
@@ -300,7 +302,7 @@ def test_description_has_timings_search_phrases_and_service(tmp_path):
     )
 
     assert "00:00 1. Ария — Штиль" in description
-    assert "Ария слушать онлайн" in description
+    assert "#ария_слушать_онлайн" in description
     assert "Infinity Music" in description
     assert description.rstrip().splitlines()[-1].startswith("#")
 

@@ -31,7 +31,7 @@ from app.media import MediaError, concat_videos, render_track_video
 from app.notifier import Notifier
 from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
-from app.seo import build_hashtags, build_search_line
+from app.seo import build_hashtags, build_search_tags
 from app.soundcloud import Track
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
@@ -64,10 +64,21 @@ class Compilation:
     вопроса секунды."""
     delivery_tracks: int = 0
     """Сколько треков попало в короткую версию. 0 — версия полная."""
+    delivery_description: str = ""
+    """Описание ИМЕННО отданного файла. ТЗ владельца 2026-08-16.
+
+    🔴 Без него в Telegram уходил треклист полного сборника — пятнадцать позиций с
+    таймингами, тогда как в самом файле их восемь. Владелец заливает этот файл на YouTube
+    вместе с описанием, то есть половина таймингов вела бы в пустоту, а последних семи
+    треков в ролике не было бы вовсе."""
 
     @property
     def file_for_owner(self) -> Path:
         return self.delivery_path or self.video_path
+
+    @property
+    def description_for_owner(self) -> str:
+        return self.delivery_description or self.description
 
 
 def sync(config: Config, playlists: PlaylistQueue) -> int:
@@ -279,10 +290,17 @@ def build_compilation(
         settings.title_templates, playlists.recent_titles(20), now, playlist_artists(tracks, 3)
     )
     video_path, delivery_path = _render(tracks, work_dir, settings.tg_max_tracks)
-    tracklist = build_tracklist(
-        [f"{track.artist} — {track.title}" if track.artist else track.title for track in tracks],
-        [track.duration_s for track in tracks],
-    )
+    tracklist = _tracklist_of(tracks)
+    delivery_description = ""
+    if delivery_path is not None:
+        # Треклист пересобирается по первым N трекам, а не режется по строкам: тайминги
+        # считаются из длительностей, и обрезка готового текста оставила бы верные
+        # подписи при неверном хронометраже.
+        short_tracks = tracks[: settings.tg_max_tracks]
+        delivery_description = build_description(
+            config, title, _tracklist_of(short_tracks), short_tracks
+        )
+
     return Compilation(
         video_path=video_path,
         title=title,
@@ -291,6 +309,7 @@ def build_compilation(
         tracks=tracks,
         delivery_path=delivery_path,
         delivery_tracks=settings.tg_max_tracks if delivery_path else 0,
+        delivery_description=delivery_description,
     )
 
 
@@ -375,6 +394,15 @@ def build_post_text(
     return "\n\n".join(block for block in blocks if block.strip())
 
 
+def _tracklist_of(tracks: list[Track]) -> str:
+    """Треклист с таймингами для набора треков. Вынесено, чтобы короткая версия для
+    Telegram считала свои тайминги, а не наследовала чужие."""
+    return build_tracklist(
+        [f"{track.artist} — {track.title}" if track.artist else track.title for track in tracks],
+        [track.duration_s for track in tracks],
+    )
+
+
 def build_description(config: Config, title: str, tracklist: str, tracks: list[Track]) -> str:
     """Описание видеозаписи — большое: описание сборника, тайминги, ключи, сервис, теги.
 
@@ -383,17 +411,21 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
     settings = config.youtube_playlists
     style = config.soundcloud.post
     artists = playlist_artists(tracks)
+    # ТЗ владельца 2026-08-16: шапка «♾️ Плейлисты от Infinity Music» и абзац «сборник
+    # собран вручную…» убраны — первым идёт само название, оно и работает заголовком.
+    # Поисковые фразы ушли из строки через точку в ХЭШТЕГИ: строка была просто текстом,
+    # по которому VK не даёт перехода.
     blocks = [
-        f"{settings.header}\n{title}".strip(),
+        f"{settings.header}\n{title}".strip() if settings.header.strip() else title,
         settings.playlist_description.strip(),
         tracklist,
-        build_search_line(artists, style.search_phrases, style.channel_phrases),
         style.service_block,
         " ".join(
             build_hashtags(
                 artists, style.base_tags, style.hashtag_group, style.video_tag_limit
             )
         ),
+        " ".join(build_search_tags(artists, style.search_phrases, style.channel_phrases)),
     ]
     return "\n\n".join(block for block in blocks if block.strip())
 

@@ -75,6 +75,48 @@ def build_search_line(
     return " · ".join(dict.fromkeys(built))
 
 
+SEARCH_TAG_LIMIT = 40
+"""Потолок поисковых тегов в описании ролика.
+
+Пятнадцать артистов на четыре шаблона дают шестьдесят фраз — столько тегов выглядит как
+спам и режется самим VK. Сорок покрывает первые десять артистов и все ключи сообщества."""
+
+
+def build_search_tags(
+    subjects: list[str],
+    phrases: list[str],
+    channel_phrases: list[str] | None = None,
+    limit: int = SEARCH_TAG_LIMIT,
+) -> list[str]:
+    """Те же поисковые фразы, но ХЭШТЕГАМИ, а не строкой через точку.
+
+    ТЗ владельца 2026-08-16: «делать только хэштегами». Строка «Егор Крид слушать онлайн ·
+    …» — это просто текст, по которому VK не даёт перехода; хэштег кликабелен и попадает
+    во внутренний поиск сообщества.
+
+    Группа к таким тегам НЕ приписывается: `#егор_крид_слушать_онлайн@club…` — это уже не
+    запрос, который кто-то наберёт, а мусор длиной в строку."""
+    built = [
+        template.format(q=subject)
+        for subject in subjects
+        if subject.strip()
+        for template in phrases
+    ]
+    built.extend(phrase for phrase in (channel_phrases or []) if phrase.strip())
+
+    seen: set[str] = set()
+    tags: list[str] = []
+    for phrase in built:
+        slug = slugify(phrase)
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        tags.append(f"#{slug}")
+        if len(tags) >= limit:
+            break
+    return tags
+
+
 def build_video_description(
     *,
     header: str,
