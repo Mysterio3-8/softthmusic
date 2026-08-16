@@ -245,7 +245,9 @@ def test_title_skips_artist_templates_when_artists_unknown():
 def test_title_has_safe_fallback_without_any_usable_template():
     now = datetime(2026, 8, 10)
 
-    assert build_title(["{artists} — микс"], [], now, []) == "Музыка без цензуры 2026"
+    # Запасное название тоже обязано читаться как СБОРНИК (ТЗ 2026-08-17), иначе на
+    # плейлисте без разобранных артистов пропадает единственный сигнал «тут много треков».
+    assert build_title(["{artists} — микс"], [], now, []) == "Музыка без цензуры 2026 — сборник"
 
 
 def test_post_text_follows_owner_template(tmp_path):
@@ -317,3 +319,47 @@ def test_description_keeps_search_keys_out_of_the_post(tmp_path):
 
     assert "#" in description
     assert "#" not in text
+
+
+def test_title_names_at_most_three_artists():
+    """ТЗ владельца 2026-08-17: «кликабельные названия». Пять имён подряд читаются как
+    свалка и обрезаются в ленте на середине перечисления."""
+    from app.yt_playlists import render_title
+
+    title = render_title(
+        "{artists} — {count} треков",
+        datetime(2026, 8, 17),
+        ["Егор Крид", "Xcho", "Джиган", "Artik & Asti", "NILETTO"],
+        15,
+    )
+
+    assert title == "Егор Крид, Xcho, Джиган и другие — 15 треков"
+
+
+def test_title_without_extra_artists_has_no_dangling_phrase():
+    from app.yt_playlists import render_title
+
+    title = render_title("{artists} — {count} треков", datetime(2026, 8, 17), ["Ария"], 5)
+
+    assert title == "Ария — 5 треков"
+
+
+def test_month_has_two_cases():
+    """«Что слушают в августа» — не опечатка, а мусор в заголовке, который читают тысячи."""
+    from app.yt_playlists import render_title
+
+    now = datetime(2026, 8, 17)
+
+    assert render_title("Сборник {month} {year}", now) == "Сборник августа 2026"
+    assert render_title("Что слушают в {month_in}", now) == "Что слушают в августе"
+
+
+def test_templates_needing_a_count_are_skipped_without_one():
+    """«ТОП-0 треков» хуже, чем безликое название."""
+    from app.yt_playlists import choose_title_template
+
+    chosen = choose_title_template(
+        ["ТОП-{count} треков", "Музыка без цензуры {year}"], [], datetime(2026, 8, 17), [], 0
+    )
+
+    assert chosen == "Музыка без цензуры {year}"

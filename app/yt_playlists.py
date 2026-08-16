@@ -287,9 +287,11 @@ def build_compilation(
         )
     _ensure_own_covers(tracks)
 
-    title = build_title(
-        settings.title_templates, playlists.recent_titles(20), now, playlist_artists(tracks, 3)
+    artists = playlist_artists(tracks)
+    template = choose_title_template(
+        settings.title_templates, playlists.recent_titles(20), now, artists, len(tracks)
     )
+    title = render_title(template, now, artists, len(tracks))
     video_path, delivery_path = _render(tracks, work_dir, settings.tg_max_tracks)
     tracklist = _tracklist_of(tracks)
     delivery_description = ""
@@ -298,8 +300,13 @@ def build_compilation(
         # считаются из длительностей, и обрезка готового текста оставила бы верные
         # подписи при неверном хронометраже.
         short_tracks = tracks[: settings.tg_max_tracks]
+        # Название то же, но с числом треков ОТДАННОГО файла: «ТОП-15» на файле из
+        # восьми песен — то же расхождение, из-за которого поехали тайминги.
+        short_title = render_title(
+            template, now, playlist_artists(short_tracks), len(short_tracks)
+        )
         delivery_description = build_description(
-            config, title, _tracklist_of(short_tracks), short_tracks
+            config, short_title, _tracklist_of(short_tracks), short_tracks
         )
 
     return Compilation(
@@ -315,7 +322,11 @@ def build_compilation(
 
 
 def build_title(
-    templates: list[str], recent: list[str], now: datetime, artists: list[str] | None = None
+    templates: list[str],
+    recent: list[str],
+    now: datetime,
+    artists: list[str] | None = None,
+    count: int = 0,
 ) -> str:
     """Название собирается с нуля — название донора не берётся даже частично, чтобы
     в сообщество не утёк чужой брендинг.
@@ -333,18 +344,77 @@ def build_title(
 
     Уже использованные недавно варианты не берём; все заняты — берём любой, потому что
     сборник без названия хуже, чем сборник с повторным."""
+    template = choose_title_template(templates, recent, now, artists, count)
+    return render_title(template, now, artists, count)
+
+
+TITLE_ARTIST_LIMIT = 3
+"""Сколько исполнителей влезает в НАЗВАНИЕ.
+
+Для ключей их берём восемь, а в заголовке пять имён («Егор Крид, Xcho, Джиган, Artik &
+Asti, NILETTO — то, что играет у всех») читаются как свалка и обрезаются в ленте до
+середины перечисления. Три — предел, после которого добавляется «и другие»."""
+
+MONTHS_GENITIVE = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+"""Для «Сборник августа 2026»."""
+
+MONTHS_PREPOSITIONAL = (
+    "январе", "феврале", "марте", "апреле", "мае", "июне",
+    "июле", "августе", "сентябре", "октябре", "ноябре", "декабре",
+)
+"""Для «Что слушают в августе». Две формы, а не одна, потому что «в августа 2026» —
+это не опечатка, а мусор в заголовке, который читают тысячи человек."""
+
+
+def render_title(
+    template: str, now: datetime, artists: list[str] | None = None, count: int = 0
+) -> str:
+    """Подставляет значения в шаблон названия.
+
+    Вынесено из выбора шаблона, чтобы короткая версия для Telegram могла получить ТО ЖЕ
+    название со своим числом треков: файл на восемь песен с заголовком «ТОП-15» — это
+    ровно то расхождение, из-за которого владелец уже ловил неверные тайминги."""
+    names = list(artists or [])[:TITLE_ARTIST_LIMIT]
+    joined = ", ".join(names)
+    if artists and len(artists) > TITLE_ARTIST_LIMIT:
+        joined += " и другие"
+    return " ".join(
+        template.format(
+            year=now.year,
+            month=MONTHS_GENITIVE[now.month - 1],
+            month_in=MONTHS_PREPOSITIONAL[now.month - 1],
+            artists=joined,
+            count=count,
+        ).split()
+    )
+
+
+def choose_title_template(
+    templates: list[str],
+    recent: list[str],
+    now: datetime,
+    artists: list[str] | None = None,
+    count: int = 0,
+) -> str:
+    """Выбирает шаблон, избегая недавно использованных названий."""
     if not templates:
-        return f"Музыка без цензуры {now.year}"
-    names = ", ".join(artists or [])
-    variants = [
-        template.format(year=now.year, artists=names)
+        return "Музыка без цензуры {year} — сборник"
+    usable = [
+        template
         for template in templates
-        if names or "{artists}" not in template
+        if (artists or "{artists}" not in template) and (count or "{count}" not in template)
     ]
-    if not variants:  # все шаблоны требуют исполнителей, а их не разобрали
-        return f"Музыка без цензуры {now.year}"
-    unused = [variant for variant in variants if variant not in recent]
-    return random.choice(unused or variants)
+    if not usable:  # все шаблоны требуют того, чего у нас нет
+        return "Музыка без цензуры {year} — сборник"
+    unused = [
+        template
+        for template in usable
+        if render_title(template, now, artists, count) not in recent
+    ]
+    return random.choice(unused or usable)
 
 
 def playlist_artists(tracks: list[Track], limit: int = 8) -> list[str]:
