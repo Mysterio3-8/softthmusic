@@ -9,6 +9,7 @@ import pytest
 from app.yt_playlist_db import PLAYLIST_PENDING, PLAYLIST_REJECTED, PlaylistQueue
 from app.yt_playlists import build_delivery_caption
 from app.yt_source import (
+    proxy_candidates,
     PlaylistEntry,
     PlaylistUnsuitable,
     download_playlist,
@@ -127,3 +128,62 @@ def test_delivery_caption_says_the_file_is_shortened():
 
 def test_delivery_caption_without_truncation_is_unchanged():
     assert "Готов к заливке" in build_delivery_caption("Плейлист 2026")
+
+
+def test_proxy_candidates_default_to_the_single_configured_exit(monkeypatch):
+    """Переменной с портами нет → поведение прежнее, одна попытка."""
+    monkeypatch.setenv("YT_PROXY", "socks5://127.0.0.1:10808")
+    monkeypatch.delenv("YT_PROXY_PORTS", raising=False)
+
+    assert proxy_candidates() == ["socks5://127.0.0.1:10808"]
+
+
+def test_proxy_candidates_try_spare_exits_then_direct(monkeypatch):
+    """Основной выход первый, дубля нет, прямой путь замыкает: он иногда проходит,
+    а «не пробовать вовсе» гарантирует сутки без сборника."""
+    monkeypatch.setenv("YT_PROXY", "socks5://127.0.0.1:10808")
+    monkeypatch.setenv("YT_PROXY_PORTS", "10808, 10813 ,10811")
+
+    assert proxy_candidates() == [
+        "socks5://127.0.0.1:10808",
+        "socks5://127.0.0.1:10813",
+        "socks5://127.0.0.1:10811",
+        None,
+    ]
+
+
+def test_download_switches_exit_when_the_first_one_returns_nothing(tmp_path, monkeypatch):
+    """🔴 Живой случай 16.08: выход отдаёт метаданные, но CDN на каждом треке шлёт 403.
+    Проверять выход метаданными бесполезно — он ответит «жив», поэтому переключаемся
+    именно по пустому результату скачивания."""
+    monkeypatch.setenv("YT_PROXY", "socks5://127.0.0.1:10808")
+    monkeypatch.setenv("YT_PROXY_PORTS", "10808,10813")
+    monkeypatch.setattr("app.yt_source.list_playlist_entries", lambda url, limit: _entries(200, 210, 220, 230, 240))
+
+    used: list[str | None] = []
+
+    class FakeYDL:
+        def __init__(self, options):
+            used.append(options.get("proxy"))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            if used[-1] == "socks5://127.0.0.1:10808":
+                raise RuntimeError("HTTP Error 403: Forbidden")
+            return {"entries": [{"id": "a"}]}
+
+    monkeypatch.setattr("app.yt_source.yt_dlp.YoutubeDL", FakeYDL)
+    monkeypatch.setattr(
+        "app.yt_source.collect_tracks",
+        lambda entries, target: ["трек"] if entries else [],
+    )
+
+    tracks = download_playlist("https://youtube.com/playlist?list=x", tmp_path / "w")
+
+    assert tracks == ["трек"]
+    assert used == ["socks5://127.0.0.1:10808", "socks5://127.0.0.1:10813"]

@@ -32,6 +32,9 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 # сущности, и без фильтра поиск отдавал бы одиночные ролики.
 _SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgIQAw%3D%3D"
 
+PROXY_PORTS_ENV = "YT_PROXY_PORTS"
+"""Запасные выходы через запятую (`10811,10812,...`). Пусто → смены выхода нет."""
+
 PROXY_ENV = "YT_PROXY"
 """Прокси для YouTube. Живой перебор VPN-выходов 2026-08-14 показал, что барьер
 «я не бот» зависит от IP, а не от куки: на шведском выходе форматы отдаются без куки
@@ -318,21 +321,60 @@ def download_playlist(
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
         ],
     }
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as exc:  # noqa: BLE001 — граница внешней библиотеки
-        raise YouTubeSourceError(f"Не удалось скачать плейлист: {exc}") from exc
+    last_error = ""
+    for attempt, proxy in enumerate(proxy_candidates(), start=1):
+        if proxy:
+            options["proxy"] = proxy
+        else:
+            options.pop("proxy", None)
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+        except Exception as exc:  # noqa: BLE001 — граница внешней библиотеки
+            last_error = str(exc)
+            info = None
 
-    if not info:
-        raise YouTubeSourceError("yt-dlp не вернул данные плейлиста")
+        tracks = collect_tracks((info or {}).get("entries") or [], target_dir)
+        if tracks:
+            get_logger().info(
+                "Скачано треков: %d из %s (выход %s)", len(tracks), url, proxy or "прямой"
+            )
+            return tracks
+        get_logger().warning(
+            "Выход %s не отдал ни одного трека (попытка %d) — меняю выход",
+            proxy or "прямой", attempt,
+        )
 
-    tracks = collect_tracks(info.get("entries") or [], target_dir)
-    if not tracks:
-        raise YouTubeSourceError("Ни один трек не скачался")
+    raise YouTubeSourceError(f"Ни один трек не скачался ни через один выход. {last_error}"[:400])
 
-    get_logger().info("Скачано треков: %d из %s", len(tracks), url)
-    return tracks
+
+def proxy_candidates() -> list[str | None]:
+    """Выходы прокси в порядке попыток. Пустая строка в конце = прямой путь.
+
+    🔴 Смена выхода нужна именно на СКАЧИВАНИИ, а не на метаданных. Живая проверка
+    2026-08-16: шведский выход отдавал 5 аудиоформатов, то есть барьер «я не бот» на нём
+    снят, — и при этом каждый трек падал с `403 Forbidden` на самих данных. CDN отвечает
+    отдельно от плеера, и выход, прошедший проверку, всё равно может не отдать файл;
+    похоже, срабатывает на всплеск (первые 15 треков скачались, следующая попытка через
+    полчаса — ноль). Проверять выход запросом метаданных бессмысленно: он ответит «жив».
+
+    Порядок: сначала основной `YT_PROXY`, затем остальные из `YT_PROXY_PORTS`, затем
+    прямой путь — он иногда проходит, а «не пробовать вовсе» гарантирует сутки без
+    сборника. Переменных нет → одна попытка тем, что задано (прежнее поведение)."""
+    primary = os.environ.get(PROXY_ENV, "").strip() or None
+    raw = os.environ.get(PROXY_PORTS_ENV, "").strip()
+    if not raw:
+        return [primary]
+
+    candidates: list[str | None] = [primary] if primary else []
+    for port in (part.strip() for part in raw.split(",")):
+        if not port:
+            continue
+        url = f"socks5://127.0.0.1:{port}"
+        if url not in candidates:
+            candidates.append(url)
+    candidates.append(None)
+    return candidates
 
 
 def collect_tracks(entries: list, target_dir: Path) -> list[Track]:
