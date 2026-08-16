@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.yt_playlist_db import PLAYLIST_PENDING, PLAYLIST_REJECTED, PlaylistQueue
-from app.yt_playlists import build_delivery_caption
+from app.yt_playlists import DELIVERY_CAPTION
 from app.yt_source import (
     proxy_candidates,
     PlaylistEntry,
@@ -119,17 +119,11 @@ def test_reject_sets_its_own_status(tmp_path):
     queue.close()
 
 
-def test_delivery_caption_says_the_file_is_shortened():
-    """Молча прислать файл короче опубликованного значит заставить владельца гадать,
-    почему длительности не сходятся."""
-    caption = build_delivery_caption("Плейлист 2026", part_of=(8, 15))
-
-    assert "8" in caption and "15" in caption
-    assert "полный" in caption
-
-
-def test_delivery_caption_without_truncation_is_unchanged():
-    assert "Готов к заливке" in build_delivery_caption("Плейлист 2026")
+def test_delivered_file_has_no_caption():
+    """ТЗ владельца 2026-08-16: «эту хрень не писать». Подпись с меткой и пояснением про
+    короткую версию убрана целиком — метка держалась ради перехвата медиа ботом, а сам
+    перехват снят 2026-08-14."""
+    assert DELIVERY_CAPTION == ""
 
 
 def test_proxy_candidates_default_to_the_single_configured_exit(monkeypatch):

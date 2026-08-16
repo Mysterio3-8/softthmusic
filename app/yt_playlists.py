@@ -496,29 +496,13 @@ def _ensure_own_covers(tracks: list[Track]) -> None:
         track.cover_path = own
 
 
-DELIVERY_CAPTION_MARKER = "#сборник"
-"""Метка в подписи файла: это ДОСТАВКА, а не просьба уникализировать.
+DELIVERY_CAPTION = ""
+"""Подпись к отданному файлу — ПУСТАЯ. ТЗ владельца 2026-08-16: «эту хрень не писать».
 
-Файл уходит в чат с ботом уведомлений (чтобы лежал рядом с текстом про этот же сборник),
-а бот Новостей — тот же самый, и присланное владельцем видео он по умолчанию гонит через
-уникализатор. Метку он проверяет у себя (`control_bot.is_soft_delivery`); значение
-дублируется в двух репозиториях осознанно — общей библиотеки у софтов нет, а связывать их
-кодом ради одной строки дороже, чем держать её синхронной."""
-
-
-def build_delivery_caption(title: str, part_of: tuple[int, int] | None = None) -> str:
-    """Подпись к файлу. `part_of` = (сколько треков в файле, сколько всего в сборнике).
-
-    Про обрезку в подписи сказано прямо: молча прислать файл короче того, что вышло в
-    ВК, значит заставить владельца самому гадать, почему их длительности не сходятся."""
-    if part_of is None:
-        return f"{DELIVERY_CAPTION_MARKER} {title}\n\nГотов к заливке на YouTube."
-    part, total = part_of
-    return (
-        f"{DELIVERY_CAPTION_MARKER} {title}\n\n"
-        f"Короткая версия: первые {part} трека(ов) из {total}. "
-        f"В ВК опубликован полный сборник."
-    )
+Раньше здесь стояла метка `#сборник`, по которой бот Новостей отличал доставку от
+просьбы уникализировать присланное медиа. Держать её больше незачем: сам перехват
+медиа снят 2026-08-14 («уникализатор не нужен»), и метка осталась бы шумом в чате,
+который владелец читает каждый день."""
 
 
 def _deliver(
@@ -553,21 +537,14 @@ def _deliver(
             bot_token=config.telegram_bot_token,
             chat_id=config.telegram_admin_chat_id,
             remote_host=settings.remote_host,
-            caption=build_delivery_caption(compilation.title, part_of),
+            caption=DELIVERY_CAPTION,
             uploader=uploader,
         )
         playlists.mark_delivered(playlist.id)
-        volume = (
-            f"Треков: {len(compilation.tracks)} (в файле первые {compilation.delivery_tracks})."
-            if part_of
-            else f"Треков: {len(compilation.tracks)}."
-        )
-        details = (
-            f"🎬 Сборник «{compilation.title}» готов.\n"
-            f"{volume}\nФайл {result.message}\n"
-            f"Публикую в VK.\n\n"
-            f"Описание для YouTube:\n{compilation.description[:2500]}"
-        )
+        # ТЗ владельца 2026-08-16: «сразу мне готовые описание давай без воды». Ни
+        # заголовка, ни счётчика треков, ни «публикую в VK» — всё это он и так видит по
+        # самому файлу, а сообщение он копирует в YouTube целиком.
+        details = compilation.description_for_owner[:3500]
         # Текст идёт ТЕМ ЖЕ каналом, что и файл, и сразу за ним. Ботом он приходил в
         # другой диалог, и владелец видел «сборник пришёл, а описания и названия к нему
         # нет» (2026-08-15). Сообщение ОДНО: дублировать описание в двух местах значит

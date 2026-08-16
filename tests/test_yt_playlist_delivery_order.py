@@ -31,6 +31,12 @@ class _Compilation:
     def file_for_owner(self) -> Path:
         return self.delivery_path or self.video_path
 
+    @property
+    def description_for_owner(self) -> str:
+        # Описание ИМЕННО отданного файла: в Telegram уходит короткая версия, и треклист
+        # полного сборника вёл бы владельца по несуществующим таймингам.
+        return getattr(self, "delivery_description", "") or self.description
+
 
 class _Settings:
     def __init__(self, tmp_path):
@@ -98,10 +104,13 @@ def test_second_attempt_does_not_send_the_file_twice(tmp_path, queue):
     assert path == second.video_path  # грузим из рабочего каталога, как и было
 
 
-def test_notification_says_it_is_publishing_not_published(tmp_path, queue):
+def test_owner_gets_the_description_and_nothing_else(tmp_path, queue):
+    """ТЗ владельца 2026-08-16: «сразу мне готовые описание давай без воды». Ни
+    заголовка, ни счётчика треков, ни «публикую в VK» — сообщение он копирует в YouTube
+    целиком, и любая служебная строка в нём лишняя."""
     queue.add("https://youtube.com/playlist?list=1", "t", "u", "src")
     notifier = FakeNotifier()
 
     _deliver(_Config(tmp_path), queue, queue.next_pending(), _compilation(tmp_path), notifier)
 
-    assert "Публикую в VK" in notifier.messages[0]
+    assert notifier.messages[0] == "описание"

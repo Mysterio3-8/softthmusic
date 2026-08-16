@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app.delivery import BOT_API_FILE_LIMIT_BYTES, deliver
 from app.tg_uploader import resolve_delivery_chat
-from app.yt_playlists import DELIVERY_CAPTION_MARKER, build_delivery_caption
+from app.yt_playlists import DELIVERY_CAPTION
 
 
 @dataclass
@@ -48,13 +48,10 @@ def test_falls_back_to_saved_messages_when_bot_unknown():
         assert resolve_delivery_chat(FakeConfig()) == 777
 
 
-def test_caption_is_marked_as_delivery():
-    """Бот Новостей — тот же самый, и присланное видео он гонит через уникализатор.
-    Метка разводит доставку и заказ на уникализацию."""
-    caption = build_delivery_caption("Русский рэп 2026")
-
-    assert caption.startswith(DELIVERY_CAPTION_MARKER)
-    assert "Русский рэп 2026" in caption
+def test_delivered_file_has_no_caption():
+    """Подпись убрана целиком (ТЗ 2026-08-16). Метка `#сборник` держалась ради того,
+    чтобы бот Новостей не гнал доставку через уникализатор; перехват снят 2026-08-14."""
+    assert DELIVERY_CAPTION == ""
 
 
 class FakeUploader:
