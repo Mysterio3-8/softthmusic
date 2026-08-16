@@ -33,6 +33,7 @@ from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
 from app.seo import build_hashtags, build_search_tags
 from app.soundcloud import Track
+from app.track_naming import split_artists
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
@@ -352,7 +353,12 @@ def playlist_artists(tracks: list[Track], limit: int = 8) -> list[str]:
     Название сборника в ключи НЕ идёт: оно придумано нами («Плейлист 2026: музыка на
     каждый день»), никто его не ищет, а в теге вся фраза слипалась в одну нелепую
     простыню `#плейлист_2026_музыка_на_каждый_день`."""
-    return list(dict.fromkeys(track.artist for track in tracks if track.artist))[:limit]
+    names: list[str] = []
+    for track in tracks:
+        # Перечисление в поле артиста разбираем: «Джиган, Artik & Asti, NILETTO» — это
+        # три исполнителя, и одним слипшимся ключом они бесполезны (ТЗ 2026-08-16).
+        names.extend(split_artists(track.artist))
+    return list(dict.fromkeys(names))[:limit]
 
 
 BOT_USERNAME = "muz_damn_bot"
