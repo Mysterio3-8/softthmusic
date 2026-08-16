@@ -95,6 +95,45 @@ def apply_sources(raw: dict, project_dir: Path | str = ".") -> dict:
     return applied
 
 
+def read_texts(project_dir: Path | str = ".") -> dict:
+    """Тексты из контракта: post_template, base_tags, channel_phrases."""
+    path = Path(project_dir) / CONTRACT_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    texts = data.get("texts") if isinstance(data, dict) else None
+    return texts if isinstance(texts, dict) else {}
+
+
+def apply_texts(raw: dict, project_dir: Path | str = ".") -> dict:
+    """Тексты контракта → `soundcloud.post`.
+
+    Кладём в ОДНУ секцию, хотя потоков два: оформление поста у трека и у сборника общее
+    (`post_builder` читает `soundcloud.post` для обоих), и разводить их значило бы
+    заставить владельца править одно и то же дважды."""
+    texts = read_texts(project_dir)
+    if not texts:
+        return {}
+
+    post = raw.setdefault("soundcloud", {}).setdefault("post", {})
+    applied: dict = {}
+    if texts.get("post_template"):
+        post["template"] = str(texts["post_template"])
+        applied["template"] = True
+    for key, target in (("base_tags", "base_tags"), ("channel_phrases", "channel_phrases")):
+        value = texts.get(key)
+        if isinstance(value, list) and value:
+            post[target] = [str(item) for item in value]
+            applied[target] = len(value)
+
+    if applied:
+        get_logger().info("Тексты из контракта: %s", applied)
+    return applied
+
+
 def apply_contract(raw: dict, project_dir: Path | str = ".") -> dict:
     """Наложить контракт на сырой конфиг ДО сборки Config. Возвращает применённое.
 
