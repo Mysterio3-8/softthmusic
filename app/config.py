@@ -10,6 +10,11 @@ from dotenv import load_dotenv
 from app.manager_contract import apply_contract, apply_sources
 
 from app.vk_token_pool import DEFAULT_DAILY_CAP, MIN_GAP_MINUTES
+from app.yt_source import (
+    MAX_TOTAL_SECONDS_DEFAULT,
+    MAX_TRACK_SECONDS_DEFAULT,
+    MIN_TRACKS_DEFAULT,
+)
 
 
 class ConfigError(Exception):
@@ -113,6 +118,14 @@ class YoutubePlaylistsConfig:
 
     Со значением по умолчанию, чтобы прежние вызовы конструктора (и тесты) не ломались:
     поле добавлено позже остальных."""
+    max_track_seconds: int = MAX_TRACK_SECONDS_DEFAULT
+    max_total_seconds: int = MAX_TOTAL_SECONDS_DEFAULT
+    min_tracks: int = MIN_TRACKS_DEFAULT
+    """Гейт состава плейлиста — см. довод в `yt_source`. Без него поиск по «chill
+    плейлист» приносил подборки часовых миксов, и сборник физически не собирался."""
+    tg_max_tracks: int = 0
+    """Сколько треков уходит в Telegram-версию сборника (ТЗ 2026-08-16: «фулл плейлист
+    можно в ВК, а в ТГ обрезанный»). 0 или больше числа треков → версия одна, полная."""
 
 
 @dataclass
@@ -347,6 +360,10 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         playlist_description=str(raw.get("playlist_description", "")),
         post_promo=str(raw.get("post_promo", "")),
         title_templates=[str(item) for item in (raw.get("title_templates") or [])],
+        max_track_seconds=int(raw.get("max_track_seconds", MAX_TRACK_SECONDS_DEFAULT)),
+        max_total_seconds=int(raw.get("max_total_seconds", MAX_TOTAL_SECONDS_DEFAULT)),
+        min_tracks=int(raw.get("min_tracks", MIN_TRACKS_DEFAULT)),
+        tg_max_tracks=int(raw.get("tg_max_tracks", 0)),
     )
 
 

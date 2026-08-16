@@ -17,12 +17,19 @@ class FakeNotifier:
 
 
 class _Compilation:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, delivery_path: Path | None = None):
         self.video_path = path
         self.title = "Плейлист 2026"
         self.description = "описание"
         self.post_text = "пост"
         self.tracks = []
+        # Короткая версия для Telegram (ТЗ 2026-08-16). Пусто → отдаём тот же файл.
+        self.delivery_path = delivery_path
+        self.delivery_tracks = 0
+
+    @property
+    def file_for_owner(self) -> Path:
+        return self.delivery_path or self.video_path
 
 
 class _Settings:

@@ -77,6 +77,10 @@ def render_track_video(
     caption задан → первые CAPTION_SECONDS секунд поверх кадра висит «название +
     исполнитель». Сбой отрисовки подписи НЕ роняет рендер: трек без подписи лучше,
     чем сборник, который не собрался."""
+    # Пишем во временный файл и переименовываем. Готовый `output_path` обязан означать
+    # «сегмент досчитан»: процесс сборника убивают по таймауту юнита прямо во время
+    # рендера, и оборванный файл под финальным именем следующий тик принял бы за готовый.
+    partial = output_path.with_name(f"{output_path.name}.part")
     caption_png = _prepare_caption(caption, output_path)
     inputs = ["-loop", "1", "-framerate", _INPUT_FPS, "-i", str(cover_path),
               "-i", str(audio_path)]
@@ -96,13 +100,15 @@ def render_track_video(
                 # звука («все аудио ускоряются, немного но заметно», 2026-07-30).
                 "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_SAMPLE_RATE),
                 "-shortest", "-movflags", "+faststart",
-                str(output_path),
+                str(partial),
             ],
             description=f"сегмент {output_path.name}",
         )
+        partial.replace(output_path)
     finally:
         if caption_png is not None:
             caption_png.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
     return output_path
 
 

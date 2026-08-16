@@ -16,6 +16,12 @@ from pathlib import Path
 PLAYLIST_PENDING = "pending"
 PLAYLIST_DONE = "done"
 PLAYLIST_FAILED = "failed"
+PLAYLIST_REJECTED = "rejected"
+"""Плейлист не подходит ПО СОСТАВУ (часовые миксы, слишком мало песен).
+
+Отдельно от `failed` ради `revive_failed`: тот возвращает в очередь временные падения
+(занятый токен, OOM, оборванная закачка), и отбракованный состав он возвращал бы вечно —
+каждый раз заново упираясь в тот же гейт."""
 
 POST_KIND_YT_PLAYLIST = "yt_playlist"
 
@@ -137,6 +143,18 @@ class PlaylistQueue:
             )
         self._conn.commit()
         return attempts
+
+    def reject(self, playlist_id: int, reason: str) -> None:
+        """Плейлист не годится по составу — убрать из очереди насовсем.
+
+        Не `bump_attempt`: попытки нужны там, где повтор может помочь, а состав
+        плейлиста от повторов не меняется. Каждая лишняя попытка здесь — это ещё один
+        холостой запрос к YouTube и ещё один тик, в котором сборник не вышел."""
+        self._conn.execute(
+            "UPDATE yt_playlists SET status = ?, error = ? WHERE id = ?",
+            (PLAYLIST_REJECTED, reason[:500], playlist_id),
+        )
+        self._conn.commit()
 
     def revive_failed(self, older_than_hours: int) -> int:
         """Вернуть в очередь давно упавшие плейлисты. Возвращает число возвращённых.

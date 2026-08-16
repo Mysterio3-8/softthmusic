@@ -37,7 +37,12 @@ from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
 from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
-from app.yt_source import YouTubeSourceError, discover_playlists, download_playlist
+from app.yt_source import (
+    PlaylistUnsuitable,
+    YouTubeSourceError,
+    discover_playlists,
+    download_playlist,
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,19 @@ class Compilation:
     post_text: str
     description: str
     tracks: list[Track]
+    delivery_path: Path | None = None
+    """Файл для отдачи владельцу в Telegram. ТЗ 2026-08-16: «если в плейлисте много
+    треков, фулл плейлист можно в ВК, а в ТГ обрезанный».
+
+    Пусто → отдаём тот же файл, что и в ВК. Короткая версия склеивается из ТЕХ ЖЕ
+    сегментов, что и полная, потоковым копированием — второй рендер не нужен, и цена
+    вопроса секунды."""
+    delivery_tracks: int = 0
+    """Сколько треков попало в короткую версию. 0 — версия полная."""
+
+    @property
+    def file_for_owner(self) -> Path:
+        return self.delivery_path or self.video_path
 
 
 def sync(config: Config, playlists: PlaylistQueue) -> int:
@@ -100,11 +118,21 @@ def tick(
     if vk.pool_is_busy():
         return "личный токен занят — ждём следующего тика"
 
-    playlist = playlists.next_pending()
-    if playlist is None:
-        return "очередь сборников пуста"
+    # Отбраковка по составу стоит один плоский запрос, поэтому в тике их можно сделать
+    # несколько подряд: очередь набита подборками часовых миксов (18 штук на 16.08), и
+    # по одной за тик софт разбирал бы их четыре с половиной часа, не выпустив сборника.
+    # Потолок нужен, чтобы тик оставался коротким: юнит — oneshot под таймером.
+    for _ in range(MAX_REJECTS_PER_TICK):
+        playlist = playlists.next_pending()
+        if playlist is None:
+            return "очередь сборников пуста"
+        result, rejected = _process(config, playlists, posts, vk, notifier, playlist, now)
+        if not rejected:
+            return result
+    return f"подряд отбраковано {MAX_REJECTS_PER_TICK} плейлистов — состав не подходит"
 
-    return _process(config, playlists, posts, vk, notifier, playlist, now)
+
+MAX_REJECTS_PER_TICK = 5
 
 
 def _daily_limit_reached(posts: AlbumQueue, max_posts_per_day: int, now: datetime) -> bool:
@@ -136,7 +164,8 @@ def _process(
     notifier: Notifier,
     playlist: PlaylistRow,
     now: datetime,
-) -> str:
+) -> tuple[str, bool]:
+    """Один плейлист. Второй элемент — «отбракован по составу», можно брать следующий."""
     settings = config.youtube_playlists
     log = get_logger()
     work_dir = settings.work_dir / f"pl_{playlist.id}"
@@ -147,9 +176,15 @@ def _process(
         # Файл уходит владельцу ДО публикации в VK (ТЗ 2026-08-10: «пускай сборники
         # приходят сразу заранее, не после публикации»). Так он получает сборник даже
         # если VK откажет: там дальше и занятый токен пула, и любая ошибка API.
-        video_path = _deliver(config, playlists, playlist, compilation, notifier)
+        delivered_path = _deliver(config, playlists, playlist, compilation, notifier)
+        # Отдача ПЕРЕНОСИТ файл в ready/. Когда в Telegram ушла короткая версия, полный
+        # ролик остался на месте и грузим в ВК именно его; когда версия была одна —
+        # исходного пути больше нет, и грузить надо с нового.
+        vk_path = (
+            compilation.video_path if compilation.video_path.exists() else delivered_path
+        )
 
-        attachment = vk.upload_video(video_path, compilation.title, compilation.description)
+        attachment = vk.upload_video(vk_path, compilation.title, compilation.description)
         post_id = vk.post_now(compilation.post_text, attachment)
         posts.log_post(POST_KIND_YT_PLAYLIST)
         playlists.mark_published(
@@ -157,16 +192,25 @@ def _process(
             f"https://vk.com/wall-{config.group_id}_{post_id}",
             published_title=compilation.title,
         )
-        return f"опубликован сборник «{compilation.title}» ({len(compilation.tracks)} треков)"
+        return (
+            f"опубликован сборник «{compilation.title}» ({len(compilation.tracks)} треков)",
+            False,
+        )
+    except PlaylistUnsuitable as exc:
+        # Состав плейлиста от повторов не изменится — убираем насовсем и в том же тике
+        # берём следующий. Попытки тут были бы холостыми запросами к YouTube.
+        playlists.reject(playlist.id, str(exc))
+        log.info("Плейлист %s отбракован: %s", playlist.url, exc)
+        return f"плейлист отбракован: {exc}", True
     except VKTokenBusy as exc:
         # НЕ поломка: свободного токена нет прямо сейчас. Попытку не тратим и файлы не
         # выбрасываем — плейлист остаётся в очереди и уйдёт следующим тиком.
         log.warning("Сборник %s отложен: %s", playlist.url, exc)
-        return "сборник отложен (нет свободного токена)"
+        return "сборник отложен (нет свободного токена)", False
     except (YouTubeSourceError, MediaError, VKError) as exc:
         attempts = playlists.bump_attempt(playlist.id, settings.max_attempts, str(exc))
         log.error("Сборник %s (попытка %d): %s", playlist.url, attempts, exc)
-        return f"ошибка сборника, попытка {attempts}"
+        return f"ошибка сборника, попытка {attempts}", False
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         cleanup_ready(settings.ready_dir, settings.ready_keep_days)
@@ -184,13 +228,20 @@ def build_compilation(
 ) -> Compilation:
     """Скачать треки, собрать видео и все тексты. Без сети VK — тестируется отдельно."""
     settings = config.youtube_playlists
-    tracks = download_playlist(playlist.url, work_dir, settings.max_tracks)
+    tracks = download_playlist(
+        playlist.url,
+        work_dir,
+        settings.max_tracks,
+        max_track_seconds=settings.max_track_seconds,
+        max_total_seconds=settings.max_total_seconds,
+        min_tracks=settings.min_tracks,
+    )
     _ensure_own_covers(tracks)
 
     title = build_title(
         settings.title_templates, playlists.recent_titles(20), now, playlist_artists(tracks, 3)
     )
-    video_path = _render(tracks, work_dir)
+    video_path, delivery_path = _render(tracks, work_dir, settings.tg_max_tracks)
     tracklist = build_tracklist(
         [f"{track.artist} — {track.title}" if track.artist else track.title for track in tracks],
         [track.duration_s for track in tracks],
@@ -201,6 +252,8 @@ def build_compilation(
         post_text=build_post_text(config, title, tracks, tracklist),
         description=build_description(config, title, tracklist, tracks),
         tracks=tracks,
+        delivery_path=delivery_path,
+        delivery_tracks=settings.tg_max_tracks if delivery_path else 0,
     )
 
 
@@ -308,22 +361,41 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
     return "\n\n".join(block for block in blocks if block.strip())
 
 
-def _render(tracks: list[Track], work_dir: Path) -> Path:
-    """Каждый трек → сегмент с подписью на первые 10 секунд, потом склейка."""
+def _render(
+    tracks: list[Track], work_dir: Path, tg_max_tracks: int = 0
+) -> tuple[Path, Path | None]:
+    """Каждый трек → сегмент с подписью на первые 10 секунд, потом склейка.
+
+    Возвращает полный сборник и (если треков больше `tg_max_tracks`) короткую версию для
+    отдачи в Telegram. ТЗ владельца 2026-08-16: «фулл плейлист можно в ВК, а в ТГ
+    обрезанный». Короткая версия — это ещё одна склейка ТЕХ ЖЕ сегментов потоковым
+    копированием: второго рендера не нужно, и стоит она секунды.
+
+    Готовый сегмент от прошлого тика переиспользуется. Рендер — самая долгая часть, и
+    когда юнит убивают по таймауту, начинать всё заново значит не доделать никогда."""
     segments: list[Path] = []
     for track in tracks:
         segment = work_dir / f"seg_{track.position:03d}.mp4"
-        render_track_video(
-            track.audio_path, track.cover_path, segment,
-            caption=TrackCaption(artist=track.artist, title=track.title),
-        )
+        if segment.exists() and segment.stat().st_size > 0:
+            get_logger().info("Сегмент %s уже готов — пропускаю", segment.name)
+        else:
+            render_track_video(
+                track.audio_path, track.cover_path, segment,
+                caption=TrackCaption(artist=track.artist, title=track.title),
+            )
         segments.append(segment)
 
     compilation = work_dir / "compilation.mp4"
     concat_videos(segments, compilation)
+
+    short: Path | None = None
+    if 0 < tg_max_tracks < len(segments):
+        short = work_dir / "compilation_tg.mp4"
+        concat_videos(segments[:tg_max_tracks], short)
+
     for segment in segments:
         segment.unlink(missing_ok=True)
-    return compilation
+    return compilation, short
 
 
 def _ensure_own_covers(tracks: list[Track]) -> None:
@@ -352,8 +424,19 @@ DELIVERY_CAPTION_MARKER = "#сборник"
 кодом ради одной строки дороже, чем держать её синхронной."""
 
 
-def build_delivery_caption(title: str) -> str:
-    return f"{DELIVERY_CAPTION_MARKER} {title}\n\nГотов к заливке на YouTube."
+def build_delivery_caption(title: str, part_of: tuple[int, int] | None = None) -> str:
+    """Подпись к файлу. `part_of` = (сколько треков в файле, сколько всего в сборнике).
+
+    Про обрезку в подписи сказано прямо: молча прислать файл короче того, что вышло в
+    ВК, значит заставить владельца самому гадать, почему их длительности не сходятся."""
+    if part_of is None:
+        return f"{DELIVERY_CAPTION_MARKER} {title}\n\nГотов к заливке на YouTube."
+    part, total = part_of
+    return (
+        f"{DELIVERY_CAPTION_MARKER} {title}\n\n"
+        f"Короткая версия: первые {part} трека(ов) из {total}. "
+        f"В ВК опубликован полный сборник."
+    )
 
 
 def _deliver(
@@ -373,23 +456,33 @@ def _deliver(
     settings = config.youtube_playlists
     if playlist.delivered:
         get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
-        return compilation.video_path
+        return compilation.file_for_owner
+    part_of = (
+        (compilation.delivery_tracks, len(compilation.tracks))
+        if compilation.delivery_path
+        else None
+    )
     try:
         uploader = TelegramUploader.from_config(config)
         result = deliver(
-            compilation.video_path,
+            compilation.file_for_owner,
             ready_dir=settings.ready_dir,
             file_name=_safe_file_name(compilation.title),
             bot_token=config.telegram_bot_token,
             chat_id=config.telegram_admin_chat_id,
             remote_host=settings.remote_host,
-            caption=build_delivery_caption(compilation.title),
+            caption=build_delivery_caption(compilation.title, part_of),
             uploader=uploader,
         )
         playlists.mark_delivered(playlist.id)
+        volume = (
+            f"Треков: {len(compilation.tracks)} (в файле первые {compilation.delivery_tracks})."
+            if part_of
+            else f"Треков: {len(compilation.tracks)}."
+        )
         details = (
             f"🎬 Сборник «{compilation.title}» готов.\n"
-            f"Треков: {len(compilation.tracks)}.\nФайл {result.message}\n"
+            f"{volume}\nФайл {result.message}\n"
             f"Публикую в VK.\n\n"
             f"Описание для YouTube:\n{compilation.description[:2500]}"
         )
@@ -404,7 +497,7 @@ def _deliver(
         return result.path
     except Exception as exc:  # noqa: BLE001 — отдача файла не должна ронять тик
         get_logger().warning("Не удалось отдать сборник владельцу: %s", exc)
-        return compilation.video_path
+        return compilation.file_for_owner
 
 
 def _safe_file_name(title: str) -> str:

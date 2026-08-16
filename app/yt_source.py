@@ -110,8 +110,39 @@ MAX_TRACKS_DEFAULT = 15
 примерно час работы ffmpeg; больше не проходит по времени тика и по диску."""
 
 
+MAX_TRACK_SECONDS_DEFAULT = 900
+"""Потолок длительности ОДНОГО трека, 15 минут.
+
+🔴 Оплачено простоем 14–16.08. Поиск по «chill плейлист на русском» приносит не
+плейлисты песен, а подборки ЧАСОВЫХ диджей-миксов: замер живьём — 3514, 3435, 3659
+секунд на «трек». Тринадцать таких = 4 ГБ аудио и почти 13 часов видео; рендер шёл
+дольше двух часов, systemd убивал юнит по `TimeoutStartSec` ровно на склейке, и всё
+начиналось заново каждые два часа. Ни одного сборника, круглосуточно занятое
+единственное ядро — и при этом ни одной ошибки в журнале, потому что с точки зрения
+кода ничего не падало.
+
+Гейт стоит ДО скачивания (на плоском списке), поэтому непригодный плейлист стоит один
+дешёвый запрос, а не четыре гигабайта трафика."""
+
+MAX_TOTAL_SECONDS_DEFAULT = 5400
+"""Потолок ВСЕГО сборника, 90 минут. Второй рубеж на случай, когда треки поодиночке
+проходят: пятнадцать десятиминутных «треков» — это снова два с половиной часа видео."""
+
+MIN_TRACKS_DEFAULT = 5
+"""Меньше — не сборник. Плейлист, из которого после отсева осталось три песни, лучше
+пропустить целиком, чем публиковать огрызок."""
+
+
 class YouTubeSourceError(Exception):
     """Плейлист не читается или ни один трек не скачался."""
+
+
+class PlaylistUnsuitable(YouTubeSourceError):
+    """Плейлист прочитался, но по составу не годится (часовые миксы, слишком мало песен).
+
+    Отдельный тип, потому что это НЕ временный сбой: повторять такой плейлист через сутки
+    бессмысленно, состав у него не изменится. `revive_failed` возвращает в очередь именно
+    временные падения, и без этого разделения отбракованные миксы возвращались бы вечно."""
 
 
 @dataclass(frozen=True)
@@ -181,18 +212,108 @@ def discover_playlists(source: str, limit: int = 20) -> list[PlaylistRef]:
     return refs
 
 
+@dataclass(frozen=True)
+class PlaylistEntry:
+    """Запись плоского списка плейлиста: позиция, название, длительность."""
+
+    index: int
+    title: str
+    duration_s: int
+
+
+def list_playlist_entries(url: str, limit: int) -> list[PlaylistEntry]:
+    """Состав плейлиста БЕЗ скачивания — один дешёвый запрос.
+
+    Плоское извлечение отдаёт длительность у YouTube всегда (проверено живьём
+    2026-08-16), и это единственный способ узнать состав до того, как на диск приедут
+    гигабайты."""
+    options = {
+        **ytdlp_base_options(),
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "ignoreerrors": True,
+        "playlistend": limit,
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:  # noqa: BLE001 — граница внешней библиотеки
+        raise YouTubeSourceError(f"Плейлист {url} не прочитался: {exc}") from exc
+    if not info:
+        raise YouTubeSourceError(f"Плейлист {url} пуст")
+
+    entries = []
+    for order, entry in enumerate(info.get("entries") or [], start=1):
+        if not entry:
+            continue  # ignoreerrors=True даёт None на недоступных роликах
+        entries.append(
+            PlaylistEntry(
+                index=entry.get("playlist_index") or order,
+                title=(entry.get("title") or "").strip(),
+                duration_s=int(entry.get("duration") or 0),
+            )
+        )
+    return entries
+
+
+def select_entries(
+    entries: list[PlaylistEntry],
+    max_tracks: int = MAX_TRACKS_DEFAULT,
+    max_track_seconds: int = MAX_TRACK_SECONDS_DEFAULT,
+    max_total_seconds: int = MAX_TOTAL_SECONDS_DEFAULT,
+) -> list[PlaylistEntry]:
+    """Что из плейлиста реально берём в сборник. Чистая функция — тестируется без сети.
+
+    Записи без длительности пропускаются: у YouTube это либо недоступный ролик, либо
+    трансляция, и «пропустить» дешевле, чем скачать неизвестно что на единственное ядро."""
+    chosen: list[PlaylistEntry] = []
+    total = 0
+    for entry in entries:
+        if len(chosen) >= max_tracks:
+            break
+        if entry.duration_s <= 0 or entry.duration_s > max_track_seconds:
+            continue
+        if total + entry.duration_s > max_total_seconds:
+            continue  # длинный трек в конце не должен закрывать дорогу коротким
+        chosen.append(entry)
+        total += entry.duration_s
+    return chosen
+
+
 def download_playlist(
-    url: str, target_dir: Path, max_tracks: int = MAX_TRACKS_DEFAULT
+    url: str,
+    target_dir: Path,
+    max_tracks: int = MAX_TRACKS_DEFAULT,
+    max_track_seconds: int = MAX_TRACK_SECONDS_DEFAULT,
+    max_total_seconds: int = MAX_TOTAL_SECONDS_DEFAULT,
+    min_tracks: int = MIN_TRACKS_DEFAULT,
 ) -> list[Track]:
-    """Треки плейлиста в mp3 с обложками. Порядок — как в плейлисте."""
+    """Треки плейлиста в mp3 с обложками. Порядок — как в плейлисте.
+
+    Состав сначала проверяется по плоскому списку, и только годные позиции уходят в
+    скачивание (`playlist_items`). Из-за этого непригодный плейлист стоит один запрос."""
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    entries = list_playlist_entries(url, max(max_tracks * 4, 40))
+    chosen = select_entries(entries, max_tracks, max_track_seconds, max_total_seconds)
+    if len(chosen) < min_tracks:
+        longest = max((entry.duration_s for entry in entries), default=0)
+        raise PlaylistUnsuitable(
+            f"Годных треков {len(chosen)} из {len(entries)} при минимуме {min_tracks}: "
+            f"длиннее {max_track_seconds} с не берём, самый длинный тут {longest} с"
+        )
+    get_logger().info(
+        "Плейлист %s: беру %d из %d записей (%d мин)",
+        url, len(chosen), len(entries), sum(e.duration_s for e in chosen) // 60,
+    )
+
     options = {
         **ytdlp_base_options(),
         "format": "bestaudio/best",
         "outtmpl": str(target_dir / "%(playlist_index)03d - %(id)s.%(ext)s"),
         "writethumbnail": True,
         "ignoreerrors": True,
-        "playlistend": max_tracks,
+        "playlist_items": ",".join(str(entry.index) for entry in chosen),
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
         ],
