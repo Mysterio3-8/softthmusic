@@ -126,6 +126,12 @@ class YoutubePlaylistsConfig:
     tg_max_tracks: int = 0
     """Сколько треков уходит в Telegram-версию сборника (ТЗ 2026-08-16: «фулл плейлист
     можно в ВК, а в ТГ обрезанный»). 0 или больше числа треков → версия одна, полная."""
+    fallback_soundcloud: bool = False
+    """Собирать СВОЮ подборку с SoundCloud, когда чужих плейлистов YouTube не осталось.
+
+    ТЗ владельца 2026-08-16 после трёх простоев подряд по разным причинам на одном и том
+    же источнике. Источники берутся из `soundcloud.discovery.sources` — отдельный список
+    заводить незачем, там уже настроен поиск популярных русских треков."""
 
 
 @dataclass
@@ -365,6 +371,7 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         max_total_seconds=int(raw.get("max_total_seconds", MAX_TOTAL_SECONDS_DEFAULT)),
         min_tracks=int(raw.get("min_tracks", MIN_TRACKS_DEFAULT)),
         tg_max_tracks=int(raw.get("tg_max_tracks", 0)),
+        fallback_soundcloud=bool(raw.get("fallback_soundcloud", False)),
     )
 
 

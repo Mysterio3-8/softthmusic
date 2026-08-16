@@ -37,6 +37,7 @@ from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
 from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
+from app.sc_compilation import SC_URL_PREFIX, collect_tracks as collect_sc_tracks, is_sc_source
 from app.yt_source import (
     PlaylistUnsuitable,
     YouTubeSourceError,
@@ -123,7 +124,7 @@ def tick(
     # по одной за тик софт разбирал бы их четыре с половиной часа, не выпустив сборника.
     # Потолок нужен, чтобы тик оставался коротким: юнит — oneshot под таймером.
     for _ in range(MAX_REJECTS_PER_TICK):
-        playlist = playlists.next_pending()
+        playlist = playlists.next_pending() or _own_compilation(config, playlists, now)
         if playlist is None:
             return "очередь сборников пуста"
         result, rejected = _process(config, playlists, posts, vk, notifier, playlist, now)
@@ -133,6 +134,29 @@ def tick(
 
 
 MAX_REJECTS_PER_TICK = 5
+
+
+def _own_compilation(config: Config, playlists: PlaylistQueue, now: datetime):
+    """Своя подборка с SoundCloud, когда чужих плейлистов не осталось.
+
+    ТЗ владельца 2026-08-16: «можешь с sc плейлисты брать или свои создавать софт будет,
+    если на ютубе проблемы». Это и есть ответ на все три простоя подряд: поток сборников
+    больше не зависит от одного внешнего источника, который то закрывается барьером, то
+    отдаёт часовые миксы вместо песен.
+
+    Запись кладём в ТУ ЖЕ очередь: тогда «отдан ли файл», «что уже публиковали» и защита
+    от повторов названий работают как у обычного плейлиста, без второго учёта.
+
+    ⚠️ Отбраковка сюда НЕ проваливается: если своя подборка не собралась (SoundCloud
+    молчит), она станет `rejected`, и следующий виток цикла попробует создать новую.
+    Потолок `MAX_REJECTS_PER_TICK` этот цикл и ограничивает."""
+    discovery = config.soundcloud.discovery
+    if not config.youtube_playlists.fallback_soundcloud or not discovery.sources:
+        return None
+    url = f"{SC_URL_PREFIX}{now.strftime('%Y%m%d%H%M%S')}"
+    playlists.add(url, "Своя подборка SoundCloud", "SoundCloud", "автосборник")
+    get_logger().info("Чужих плейлистов нет — собираю свою подборку с SoundCloud")
+    return playlists.next_pending()
 
 
 def _daily_limit_reached(posts: AlbumQueue, max_posts_per_day: int, now: datetime) -> bool:
@@ -228,14 +252,27 @@ def build_compilation(
 ) -> Compilation:
     """Скачать треки, собрать видео и все тексты. Без сети VK — тестируется отдельно."""
     settings = config.youtube_playlists
-    tracks = download_playlist(
-        playlist.url,
-        work_dir,
-        settings.max_tracks,
-        max_track_seconds=settings.max_track_seconds,
-        max_total_seconds=settings.max_total_seconds,
-        min_tracks=settings.min_tracks,
-    )
+    if is_sc_source(playlist.url):
+        # Своя подборка с SoundCloud: донора нет, треки набираются поиском.
+        tracks = collect_sc_tracks(
+            config.soundcloud.discovery.sources,
+            work_dir,
+            wanted=settings.max_tracks,
+            min_tracks=settings.min_tracks,
+            max_track_seconds=settings.max_track_seconds,
+            min_plays=config.soundcloud.discovery.min_plays,
+        )
+        if not tracks:
+            raise PlaylistUnsuitable("SoundCloud не отдал достаточно треков для сборника")
+    else:
+        tracks = download_playlist(
+            playlist.url,
+            work_dir,
+            settings.max_tracks,
+            max_track_seconds=settings.max_track_seconds,
+            max_total_seconds=settings.max_total_seconds,
+            min_tracks=settings.min_tracks,
+        )
     _ensure_own_covers(tracks)
 
     title = build_title(
