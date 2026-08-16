@@ -140,17 +140,23 @@ def concat_videos(segments: list[Path], output_path: Path) -> Path:
     lines = [f"file '{_escape(segment)}'" for segment in segments]
     list_file.write_text("\n".join(lines), encoding="utf-8")
 
+    # Склейка тоже пишется во временный файл: её убивали по таймауту юнита ровно так же,
+    # как рендер, а оборванный `compilation.mp4` следующий тик принял бы за готовый и
+    # залил бы в ВК битый ролик. Расширение сохраняем — ffmpeg выбирает контейнер по имени.
+    partial = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
     try:
         _run_ffmpeg(
             [
                 "-f", "concat", "-safe", "0", "-i", str(list_file),
                 "-c", "copy", "-movflags", "+faststart",
-                str(output_path),
+                str(partial),
             ],
             description=f"склейка {len(segments)} сегментов",
         )
+        partial.replace(output_path)
     finally:
         list_file.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
     return output_path
 
 

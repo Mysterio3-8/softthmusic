@@ -398,6 +398,11 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
     return "\n\n".join(block for block in blocks if block.strip())
 
 
+def _ready(path: Path) -> bool:
+    """Файл существует и не пуст. Атомарная запись гарантирует: значит, он досчитан."""
+    return path.exists() and path.stat().st_size > 0
+
+
 def _render(
     tracks: list[Track], work_dir: Path, tg_max_tracks: int = 0
 ) -> tuple[Path, Path | None]:
@@ -410,6 +415,18 @@ def _render(
 
     Готовый сегмент от прошлого тика переиспользуется. Рендер — самая долгая часть, и
     когда юнит убивают по таймауту, начинать всё заново значит не доделать никогда."""
+    compilation = work_dir / "compilation.mp4"
+    short_expected = 0 < tg_max_tracks < len(tracks)
+    short = work_dir / "compilation_tg.mp4" if short_expected else None
+
+    # Готовый сборник от прошлого тика не пересобираем. Случай не теоретический: файл
+    # отдан владельцу, а публикация в ВК ждёт окна — между ними часы, и рендер пятнадцати
+    # треков заново это ещё полчаса единственного ядра ради того же самого файла.
+    # Имя `compilation.mp4` означает «досчитан» — см. атомарную запись в `concat_videos`.
+    if _ready(compilation) and (short is None or _ready(short)):
+        get_logger().info("Сборник уже собран (%s) — пропускаю рендер", compilation.name)
+        return compilation, short
+
     segments: list[Path] = []
     for track in tracks:
         segment = work_dir / f"seg_{track.position:03d}.mp4"
@@ -422,12 +439,8 @@ def _render(
             )
         segments.append(segment)
 
-    compilation = work_dir / "compilation.mp4"
     concat_videos(segments, compilation)
-
-    short: Path | None = None
-    if 0 < tg_max_tracks < len(segments):
-        short = work_dir / "compilation_tg.mp4"
+    if short is not None:
         concat_videos(segments[:tg_max_tracks], short)
 
     for segment in segments:
