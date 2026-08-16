@@ -80,7 +80,10 @@ def render_track_video(
     # Пишем во временный файл и переименовываем. Готовый `output_path` обязан означать
     # «сегмент досчитан»: процесс сборника убивают по таймауту юнита прямо во время
     # рендера, и оборванный файл под финальным именем следующий тик принял бы за готовый.
-    partial = output_path.with_name(f"{output_path.name}.part")
+    # ⚠️ Расширение обязано остаться прежним: ffmpeg выбирает контейнер ПО ИМЕНИ файла,
+    # и на `seg_001.mp4.part` он падает «Unable to choose an output format» (поймано
+    # живым прогоном 2026-08-16, юнит-тесты этого не видят — там ffmpeg замокан).
+    partial = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
     caption_png = _prepare_caption(caption, output_path)
     inputs = ["-loop", "1", "-framerate", _INPUT_FPS, "-i", str(cover_path),
               "-i", str(audio_path)]
