@@ -13,6 +13,7 @@ set -euo pipefail
 HOST="news-rewriter-vps"
 REMOTE_DIR="/opt/yt-vk-publisher"
 TIMER="tg-sc-publisher.timer"
+PLAYLIST_TIMER="tg-yt-playlists.timer"
 
 # ⚠️ ssh из Git Bash НЕ читает ~/.ssh/config, если имя пользователя Windows написано
 # кириллицей: msys-сборка OpenSSH не находит домашний каталог, читает только
@@ -54,9 +55,15 @@ import app.yt_playlists_cli
 echo "==> Импорты чистые. Обновление юнитов и перезапуск таймеров..."
 # Правку .timer/.service из репозитория надо доносить до /etc/systemd — иначе
 # сервер молча живёт со старым расписанием (поймано 2026-07-29).
+# 🔴 Перезапускать надо ОБА таймера, а не один. 2026-08-16 деплой заменил файл
+# tg-yt-playlists.timer и сделал daemon-reload, но перезапустил только таймер треков —
+# таймер сборников остался в состоянии inactive и простоял так СУТКИ. Сборников не было,
+# при этом юнит числился enabled, очередь была полна, а в журнале софта — тишина, потому
+# что его просто никто не запускал. Проверка is-active обязана покрывать оба.
 ssh "$HOST" "cp $REMOTE_DIR/deploy/tg-sc-publisher.{service,timer} /etc/systemd/system/ \
   && cp $REMOTE_DIR/deploy/tg-yt-playlists.{service,timer} /etc/systemd/system/ \
   && systemctl daemon-reload \
-  && systemctl restart $TIMER && systemctl is-active $TIMER"
+  && systemctl restart $TIMER $PLAYLIST_TIMER \
+  && systemctl is-active $TIMER $PLAYLIST_TIMER"
 
 echo "==> Готово."
