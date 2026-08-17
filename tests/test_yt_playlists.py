@@ -363,3 +363,75 @@ def test_templates_needing_a_count_are_skipped_without_one():
     )
 
     assert chosen == "Музыка без цензуры {year}"
+
+
+def test_window_start_is_todays_opening():
+    """Окно Музыки 00:00–09:00 МСК: тишина 9..24, работа с полуночи."""
+    from app.yt_playlists import window_start
+
+    now = datetime(2026, 8, 18, 3, 45)
+
+    assert window_start(now, quiet_start_hour=9, quiet_end_hour=0) == datetime(2026, 8, 18, 0, 0)
+
+
+def test_window_start_rolls_back_when_opening_is_later_today():
+    """Окно Кино 09:00–24:00. В 10:00 окно открылось сегодня в 09:00, а не вчера."""
+    from app.yt_playlists import window_start
+
+    assert window_start(
+        datetime(2026, 8, 18, 10, 0), quiet_start_hour=0, quiet_end_hour=9
+    ) == datetime(2026, 8, 18, 9, 0)
+
+
+def test_window_start_without_quiet_hours_is_midnight():
+    """Тишина не задана → сутки целиком, прежнее поведение."""
+    from app.yt_playlists import window_start
+
+    assert window_start(
+        datetime(2026, 8, 18, 15, 0), quiet_start_hour=0, quiet_end_hour=0
+    ) == datetime(2026, 8, 18, 0, 0)
+
+
+def test_quota_is_counted_from_the_window_opening():
+    """🔴 Счётчик был скользящим за 24 часа при окне в 9 часов, и это давало НЕ два
+    сборника в сутки, а один: первый выходил в 00:00, второй в 03:45, а следующей ночью
+    в 00:00 оба ещё «в сутках» — ночь пропускалась целиком, и публикации уползали всё
+    позже, рискуя вывалиться из окна совсем."""
+    from app.yt_playlists import _daily_limit_reached
+
+    class _Settings:
+        quiet_start_hour = 9
+        quiet_end_hour = 0
+
+    class _Posts:
+        def __init__(self):
+            self.boundary = None
+
+        def posts_since(self, moment, kinds=None):
+            self.boundary = moment
+            return 0
+
+    posts = _Posts()
+    _daily_limit_reached(posts, 2, datetime(2026, 8, 18, 3, 45), _Settings)
+
+    # Граница — открытие окна этой ночи, а не «сутки назад».
+    assert posts.boundary == datetime(2026, 8, 18, 0, 0)
+
+
+def test_quota_without_settings_stays_on_rolling_day():
+    """Старый вызов без окна обязан работать ровно как раньше."""
+    from app.yt_playlists import _daily_limit_reached
+
+    class _Posts:
+        def __init__(self):
+            self.boundary = None
+
+        def posts_since(self, moment, kinds=None):
+            self.boundary = moment
+            return 0
+
+    posts = _Posts()
+    now = datetime(2026, 8, 18, 3, 45)
+    _daily_limit_reached(posts, 2, now)
+
+    assert posts.boundary == now - timedelta(days=1)

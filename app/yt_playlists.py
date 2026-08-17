@@ -120,7 +120,7 @@ def tick(
 
     if not settings.enabled:
         return "поток сборников выключен"
-    if _daily_limit_reached(posts, settings.max_posts_per_day, now):
+    if _daily_limit_reached(posts, settings.max_posts_per_day, now, settings):
         return "суточный лимит сборников исчерпан"
     if is_quiet_hour(now, settings.quiet_start_hour, settings.quiet_end_hour):
         return "ночная пауза"
@@ -175,9 +175,37 @@ def _own_compilation(config: Config, playlists: PlaylistQueue, now: datetime):
     return playlists.next_pending()
 
 
-def _daily_limit_reached(posts: AlbumQueue, max_posts_per_day: int, now: datetime) -> bool:
+def window_start(now: datetime, quiet_start_hour: int, quiet_end_hour: int) -> datetime:
+    """Когда открылось ТЕКУЩЕЕ рабочее окно софта (в МСК).
+
+    Рабочее окно — это `[quiet_end, quiet_start)`: тишина задаётся конфигом, работа — то,
+    что осталось. Окно на все сутки (тишины нет) → начало суток."""
+    if quiet_start_hour == quiet_end_hour:
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    opened = now.replace(hour=quiet_end_hour % 24, minute=0, second=0, microsecond=0)
+    if opened > now:
+        opened -= timedelta(days=1)
+    return opened
+
+
+def _daily_limit_reached(
+    posts: AlbumQueue, max_posts_per_day: int, now: datetime, settings=None
+) -> bool:
+    """Исчерпан ли лимит В ТЕКУЩЕМ ОКНЕ.
+
+    🔴 Считалось скользящими сутками, и при девятичасовом окне это давало НЕ два сборника
+    в сутки, а один. Арифметика: первый выходит в 00:00 МСК, второй в 03:45; следующей
+    ночью в 00:00 оба ещё внутри 24 часов, счётчик показывает 2 — и ночь пропускается
+    целиком. Публикации вдобавок уползали всё позже и рисковали вывалиться из окна.
+
+    Считаем от ОТКРЫТИЯ окна: каждую ночь квота начинается заново, дрейфа нет.
+    Софт без окна (тишина не задана) получает ровно прежнее поведение — сутки целиком."""
     kinds = (POST_KIND_YT_PLAYLIST,)
-    return posts.posts_since(now - timedelta(days=1), kinds) >= max_posts_per_day
+    if settings is None:
+        since = now - timedelta(days=1)
+    else:
+        since = window_start(now, settings.quiet_start_hour, settings.quiet_end_hour)
+    return posts.posts_since(since, kinds) >= max_posts_per_day
 
 
 def _minutes_until_due(posts: AlbumQueue, settings, now: datetime) -> int:
