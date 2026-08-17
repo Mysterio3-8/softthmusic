@@ -33,11 +33,20 @@ ACCENT = (255, 214, 0)
 """Жёлтый — тот же, что на подписях клипов Кино: он держит контраст на любом фоне."""
 
 
+MONTHS_NOMINATIVE = (
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+)
+"""На обложке месяц стоит ОТДЕЛЬНОЙ подписью, а не внутри фразы, поэтому нужен
+именительный: «АВГУСТ 2026». Родительный «АВГУСТА 2026» без опоры читается как обрывок
+(поймано глазом на первом же отрендеренном превью)."""
+
+
 def build_thumbnail(
     out_path: Path,
     *,
     count: int,
-    month: str,
+    month_index: int,
     year: int,
     artists: list[str],
     cover_path: Path | None = None,
@@ -83,11 +92,13 @@ def build_thumbnail(
     small = ImageFont.truetype(str(font_path), 54)
 
     _centered(draw, f"ТОП-{count}", 120, big, ACCENT)
-    _centered(draw, f"{month} {year}".upper(), 360, medium, (255, 255, 255))
+    _centered(draw, f"{MONTHS_NOMINATIVE[month_index - 1]} {year}".upper(), 355, medium, (255, 255, 255))
     names = ", ".join(artists[:3])
     if names:
         _centered(draw, names, 470, small, (235, 235, 235))
-    _centered(draw, "ТРЕКОВ ПОДРЯД · БЕЗ РЕКЛАМЫ", 600, small, ACCENT)
+    # «ТРЕКОВ ПОДРЯД» здесь висело обрывком: глаз читает нижнюю строку отдельно от
+    # «ТОП-15», а не как её продолжение.
+    _centered(draw, "ПОДРЯД · БЕЗ РЕКЛАМЫ", 600, small, ACCENT)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path, "JPEG", quality=90)

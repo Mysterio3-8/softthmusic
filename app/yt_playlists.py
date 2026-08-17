@@ -316,7 +316,7 @@ def build_compilation(
     thumbnail = build_thumbnail(
         work_dir / "thumbnail.jpg",
         count=len(tracks),
-        month=MONTHS_GENITIVE[now.month - 1],
+        month_index=now.month,
         year=now.year,
         artists=artists,
         cover_path=tracks[0].cover_path if tracks else None,
