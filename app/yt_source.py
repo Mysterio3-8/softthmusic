@@ -23,7 +23,7 @@ from app.soundcloud import Track
 
 # Разбор «Артист — Песня» вынесен в общий модуль: та же задача стоит и у находок
 # SoundCloud, где uploader — паблик-перезаливщик, а не исполнитель.
-from app.track_naming import clean_artist, clean_title, split_artist_title  # noqa: F401
+from app.track_naming import clean_artist, clean_title, split_artist_title, track_key
 
 _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
@@ -264,18 +264,27 @@ def select_entries(
     max_tracks: int = MAX_TRACKS_DEFAULT,
     max_track_seconds: int = MAX_TRACK_SECONDS_DEFAULT,
     max_total_seconds: int = MAX_TOTAL_SECONDS_DEFAULT,
+    skip_keys: set[str] | None = None,
 ) -> list[PlaylistEntry]:
     """Что из плейлиста реально берём в сборник. Чистая функция — тестируется без сети.
 
     Записи без длительности пропускаются: у YouTube это либо недоступный ролик, либо
     трансляция, и «пропустить» дешевле, чем скачать неизвестно что на единственное ядро."""
     chosen: list[PlaylistEntry] = []
+    seen = set(skip_keys or ())
     total = 0
     for entry in entries:
         if len(chosen) >= max_tracks:
             break
         if entry.duration_s <= 0 or entry.duration_s > max_track_seconds:
             continue
+        # Песня уже выходила в прошлых сборниках (или повторяется внутри этого) —
+        # пропускаем ДО скачивания, иначе платим трафиком за то, что всё равно выбросим.
+        artist, name = split_artist_title(entry.title, "")
+        key = track_key(artist, name)
+        if key in seen:
+            continue
+        seen.add(key)
         if total + entry.duration_s > max_total_seconds:
             continue  # длинный трек в конце не должен закрывать дорогу коротким
         chosen.append(entry)
@@ -290,6 +299,7 @@ def download_playlist(
     max_track_seconds: int = MAX_TRACK_SECONDS_DEFAULT,
     max_total_seconds: int = MAX_TOTAL_SECONDS_DEFAULT,
     min_tracks: int = MIN_TRACKS_DEFAULT,
+    skip_keys: set[str] | None = None,
 ) -> list[Track]:
     """Треки плейлиста в mp3 с обложками. Порядок — как в плейлисте.
 
@@ -298,12 +308,15 @@ def download_playlist(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     entries = list_playlist_entries(url, max(max_tracks * 4, 40))
-    chosen = select_entries(entries, max_tracks, max_track_seconds, max_total_seconds)
+    chosen = select_entries(
+        entries, max_tracks, max_track_seconds, max_total_seconds, skip_keys
+    )
     if len(chosen) < min_tracks:
         longest = max((entry.duration_s for entry in entries), default=0)
         raise PlaylistUnsuitable(
             f"Годных треков {len(chosen)} из {len(entries)} при минимуме {min_tracks}: "
-            f"длиннее {max_track_seconds} с не берём, самый длинный тут {longest} с"
+            f"длиннее {max_track_seconds} с не берём (самый длинный тут {longest} с), "
+            f"уже выходивших песен в памяти {len(skip_keys or ())}"
         )
     get_logger().info(
         "Плейлист %s: беру %d из %d записей (%d мин)",

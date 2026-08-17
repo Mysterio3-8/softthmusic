@@ -34,7 +34,7 @@ from app.post_builder import build_tracklist
 from app.seo import build_hashtags, build_search_tags
 from app.soundcloud import Track
 from app.thumbnail import build_thumbnail
-from app.track_naming import split_artists
+from app.track_naming import split_artists, track_key
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
@@ -232,6 +232,12 @@ def _process(
             f"https://vk.com/wall-{config.group_id}_{post_id}",
             published_title=compilation.title,
         )
+        # Запоминаем ПЕСНИ, а не только плейлист: очередь набита разными ссылками с почти
+        # одинаковым содержимым, и без этой памяти следующий сборник повторял предыдущий
+        # (жалоба владельца 2026-08-17 «почему в сборниках треки одинаковые»).
+        playlists.remember_tracks(
+            [track_key(track.artist, track.title) for track in compilation.tracks]
+        )
         return (
             f"опубликован сборник «{compilation.title}» ({len(compilation.tracks)} треков)",
             False,
@@ -288,6 +294,7 @@ def build_compilation(
             max_track_seconds=settings.max_track_seconds,
             max_total_seconds=settings.max_total_seconds,
             min_tracks=settings.min_tracks,
+            skip_keys=playlists.recent_track_keys(),
         )
     _ensure_own_covers(tracks)
 

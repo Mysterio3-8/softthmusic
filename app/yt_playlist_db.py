@@ -68,6 +68,7 @@ class PlaylistQueue:
             """
         )
         self._add_missing_columns()
+        self._ensure_published_tracks()
         self._conn.commit()
 
     def _add_missing_columns(self) -> None:
@@ -78,6 +79,46 @@ class PlaylistQueue:
             self._conn.execute("ALTER TABLE yt_playlists ADD COLUMN delivered_at TEXT")
         if "published_title" not in existing:
             self._conn.execute("ALTER TABLE yt_playlists ADD COLUMN published_title TEXT")
+
+    def _ensure_published_tracks(self) -> None:
+        """Память о том, какие ПЕСНИ уже выходили.
+
+        🔴 Жалоба владельца 2026-08-17: «почему в сборниках треки одинаковые». Плейлисты
+        разные — каждый публикуется один раз, — но очередь целиком набита выдачей одного
+        запроса («русский рэп плейлист 2026»), а такие подборки пересекаются по составу
+        на две трети. Без памяти о песнях каждый следующий сборник повторял предыдущий."""
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS published_tracks (
+                track_key    TEXT PRIMARY KEY,
+                published_at TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.commit()
+
+    def remember_tracks(self, keys: list[str]) -> int:
+        """Запомнить вышедшие песни. Повтор ключа не ошибка — обновляем дату."""
+        now = _now_iso()
+        rows = [(key, now) for key in keys if key]
+        if not rows:
+            return 0
+        self._conn.executemany(
+            "INSERT INTO published_tracks (track_key, published_at) VALUES (?, ?) "
+            "ON CONFLICT(track_key) DO UPDATE SET published_at = excluded.published_at",
+            rows,
+        )
+        self._conn.commit()
+        return len(rows)
+
+    def recent_track_keys(self, limit: int = 400) -> set[str]:
+        """Песни последних сборников. Не «все за всё время»: через полгода запрет на
+        повтор выел бы весь популярный репертуар, и собирать сборники стало бы не из чего."""
+        rows = self._conn.execute(
+            "SELECT track_key FROM published_tracks ORDER BY published_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return {row["track_key"] for row in rows}
 
     def close(self) -> None:
         self._conn.close()

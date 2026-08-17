@@ -42,7 +42,10 @@ def acquire(lock_path: Path, stale_after: int = STALE_AFTER_SECONDS) -> Path:
         fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         age = time.time() - lock_path.stat().st_mtime
-        if age < stale_after:
+        # `stale_after <= 0` означает «забрать в любом случае». Сравнения одного age с
+        # порогом мало: время файла бывает на доли секунды в будущем (гранулярность
+        # файловой системы), и тогда возраст отрицательный, а замок — «свежий навсегда».
+        if stale_after > 0 and age < stale_after:
             raise AlreadyRunning(
                 f"тик уже идёт {int(age // 60)} мин (замок {lock_path.name})"
             ) from None

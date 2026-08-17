@@ -240,3 +240,42 @@ def test_search_hashtags_are_capped():
     )
 
     assert len(tags) == 10
+
+
+def test_already_published_songs_are_skipped():
+    """🔴 Жалоба владельца 2026-08-17: «почему в сборниках треки одинаковые». Очередь
+    набита выдачей ОДНОГО запроса — разные ссылки, но состав пересекается на две трети."""
+    from app.track_naming import track_key
+
+    entries = [
+        PlaylistEntry(index=1, title="Егор Крид - MALO 2.0", duration_s=200),
+        PlaylistEntry(index=2, title="Xcho - Уйду", duration_s=200),
+        PlaylistEntry(index=3, title="Джиган - Худи", duration_s=200),
+    ]
+    already = {track_key("Егор Крид", "MALO 2.0"), track_key("Xcho", "Уйду")}
+
+    chosen = select_entries(entries, max_track_seconds=900, skip_keys=already)
+
+    assert [entry.index for entry in chosen] == [3]
+
+
+def test_same_song_twice_in_one_playlist_is_taken_once():
+    """Перезаливы одного хита лежат в подборке рядом — в треклисте это выглядит поломкой."""
+    entries = [
+        PlaylistEntry(index=1, title="Баста - Сансара (Премьера клипа 2024)", duration_s=200),
+        PlaylistEntry(index=2, title="Баста — Сансара [аудио]", duration_s=200),
+        PlaylistEntry(index=3, title="Кино - Звезда", duration_s=200),
+    ]
+
+    chosen = select_entries(entries, max_track_seconds=900)
+
+    assert [entry.index for entry in chosen] == [1, 3]
+
+
+def test_track_key_ignores_junk_and_case():
+    """Один трек на разных каналах подписан по-разному — по сырому тексту не совпадёт."""
+    from app.track_naming import track_key
+
+    assert track_key("Егор Крид", "MALO 2.0 (Премьера клипа)") == track_key(
+        "егор крид", "malo 2.0!"
+    )

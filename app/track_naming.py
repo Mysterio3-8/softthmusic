@@ -110,3 +110,16 @@ def split_artist_title(title: str, uploader: str) -> tuple[str, str]:
         if found and artist.strip() and clean_title(name).strip():
             return clean_artist(artist.strip()), clean_title(name)
     return clean_artist(uploader), clean_title(raw)
+
+
+def track_key(artist: str, title: str) -> str:
+    """Ключ песни для памяти «это уже выходило».
+
+    Считается из РАЗОБРАННЫХ артиста и названия, а не из сырой строки: один и тот же
+    трек на разных каналах называется то «Артист - Песня (Премьера клипа)», то
+    «Артист — Песня [аудио]», и по сырому тексту они никогда не совпадут.
+
+    Всё лишнее выброшено: регистр, пробелы, знаки. «Егор Крид — MALO 2.0» и
+    «егор крид - malo 2.0!» обязаны давать один ключ, иначе память бесполезна."""
+    raw = f"{clean_artist(artist)}|{clean_title(title)}".lower()
+    return re.sub(r"[^0-9a-zа-яё|]+", "", raw)
