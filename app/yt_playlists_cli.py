@@ -22,6 +22,7 @@ from app.config import Config, ConfigError, load_config  # noqa: E402
 from app.logger import get_logger, setup_logging  # noqa: E402
 from app.notifier import Notifier  # noqa: E402
 from app.vk_client import VKClient, build_token_pool  # noqa: E402
+from app.single_run import AlreadyRunning, acquire, release  # noqa: E402
 from app.yt_playlist_db import PlaylistQueue  # noqa: E402
 from app.yt_playlists import sync, tick  # noqa: E402
 
@@ -75,6 +76,24 @@ def _cmd_status(playlists: PlaylistQueue) -> int:
 
 
 def _cmd_tick(config: Config, playlists: PlaylistQueue) -> int:
+    log = get_logger()
+    # Один тик за раз. Таймер ходит каждые 15 минут, а сборка идёт 25–30 — без замка
+    # тики накладывались и писали в один рабочий каталог, убивая временные файлы друг
+    # друга (живая поломка 17.08, подробности в single_run).
+    lock = config.youtube_playlists.work_dir / "tick.lock"
+    try:
+        acquire(lock)
+    except AlreadyRunning as exc:
+        log.info("Тик сборников пропущен: %s", exc)
+        print(f"пропуск: {exc}")
+        return 0
+    try:
+        return _run_tick(config, playlists)
+    finally:
+        release(lock)
+
+
+def _run_tick(config: Config, playlists: PlaylistQueue) -> int:
     log = get_logger()
     # Очередь пуста — сами добираем плейлисты. Иначе поток молча простаивал бы, пока
     # кто-то не вызовет sync руками; для потока, который ищет источники сам, это

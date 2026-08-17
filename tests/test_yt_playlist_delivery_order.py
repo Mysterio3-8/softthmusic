@@ -26,6 +26,7 @@ class _Compilation:
         # Короткая версия для Telegram (ТЗ 2026-08-16). Пусто → отдаём тот же файл.
         self.delivery_path = delivery_path
         self.delivery_tracks = 0
+        self.thumbnail_path = None
 
     @property
     def file_for_owner(self) -> Path:

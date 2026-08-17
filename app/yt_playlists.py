@@ -33,6 +33,7 @@ from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
 from app.seo import build_hashtags, build_search_tags
 from app.soundcloud import Track
+from app.thumbnail import build_thumbnail
 from app.track_naming import split_artists
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
@@ -65,6 +66,9 @@ class Compilation:
     вопроса секунды."""
     delivery_tracks: int = 0
     """Сколько треков попало в короткую версию. 0 — версия полная."""
+    thumbnail_path: Path | None = None
+    """Обложка 1280×720 для YouTube (ТЗ 2026-08-17). None — Pillow или шрифт недоступны;
+    сборник без превью хуже, чем с превью, но несравнимо лучше, чем его отсутствие."""
     delivery_description: str = ""
     """Описание ИМЕННО отданного файла. ТЗ владельца 2026-08-16.
 
@@ -309,8 +313,18 @@ def build_compilation(
             config, short_title, _tracklist_of(short_tracks), short_tracks
         )
 
+    thumbnail = build_thumbnail(
+        work_dir / "thumbnail.jpg",
+        count=len(tracks),
+        month=MONTHS_GENITIVE[now.month - 1],
+        year=now.year,
+        artists=artists,
+        cover_path=tracks[0].cover_path if tracks else None,
+    )
+
     return Compilation(
         video_path=video_path,
+        thumbnail_path=thumbnail,
         title=title,
         post_text=build_post_text(config, title, tracks, tracklist),
         description=build_description(config, title, tracklist, tracks),
@@ -629,6 +643,10 @@ def _deliver(
         if not (result.sent_to_telegram and uploader is not None
                 and uploader.send_message(details)):
             notifier.send(details)
+        # Обложка уходит ОТДЕЛЬНЫМ файлом и последней: на YouTube превью ставится
+        # вручную, и картинка должна лежать в чате рядом с роликом и описанием.
+        if compilation.thumbnail_path and uploader is not None:
+            uploader.send_file(compilation.thumbnail_path)
         return result.path
     except Exception as exc:  # noqa: BLE001 — отдача файла не должна ронять тик
         get_logger().warning("Не удалось отдать сборник владельцу: %s", exc)
