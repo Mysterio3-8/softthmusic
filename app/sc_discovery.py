@@ -28,6 +28,8 @@ from dataclasses import dataclass
 
 import yt_dlp
 
+from urllib.parse import parse_qs, unquote, urlparse
+
 from app.logger import get_logger
 from app.track_naming import split_artist_title
 
@@ -63,9 +65,25 @@ def build_source_url(source: str, limit: int) -> str:
     произвольный текст считаем поисковым запросом. Так один список в конфиге принимает
     и «вот этот плейлист», и «ищи популярное по такой теме» — как у сборников YouTube."""
     text = source.strip()
+    # 🔴 Ссылка на СТРАНИЦУ ПОИСКА SoundCloud — не то же самое, что ссылка на плейлист:
+    # yt-dlp её не умеет и падает. Владелец 2026-08-17 дал источник именно в таком виде
+    # («https://soundcloud.com/search?q=bandana»), и молча уронить его значило бы отдать
+    # владельцу ошибку вместо музыки. Переводим в родной поисковый запрос yt-dlp.
+    query = _search_query(text)
+    if query:
+        return f"scsearch{max(1, limit)}:{query}"
     if text.startswith("http://") or text.startswith("https://"):
         return text
     return f"scsearch{max(1, limit)}:{text}"
+
+
+def _search_query(url: str) -> str:
+    """«soundcloud.com/search?q=bandana» → «bandana». Пусто — это не поиск."""
+    if "soundcloud.com/search" not in url:
+        return ""
+    parsed = urlparse(url)
+    values = parse_qs(parsed.query).get("q") or []
+    return unquote(values[0]).strip() if values else ""
 
 
 def discover_tracks(

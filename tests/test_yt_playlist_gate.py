@@ -279,3 +279,17 @@ def test_track_key_ignores_junk_and_case():
     assert track_key("Егор Крид", "MALO 2.0 (Премьера клипа)") == track_key(
         "егор крид", "malo 2.0!"
     )
+
+
+def test_playlists_are_taken_in_random_order(tmp_path):
+    """ТЗ владельца 2026-08-17: «сборники пускай рандомные берёт». По порядку id очередь
+    разбиралась ровно так, как её насыпал поиск — подряд шли соседние результаты одного
+    запроса, то есть самые похожие подборки."""
+    queue = PlaylistQueue(tmp_path / "db.sqlite")
+    for i in range(30):
+        queue.add(f"https://youtube.com/playlist?list={i}", f"П{i}", "канал", "поиск")
+
+    picked = {queue.next_pending().url for _ in range(15)}
+
+    assert len(picked) > 1, "выбор не случайный — всегда один и тот же плейлист"
+    queue.close()

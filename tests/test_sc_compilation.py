@@ -128,3 +128,28 @@ def test_silent_search_yields_nothing(monkeypatch, tmp_path):
     assert collect_tracks(
         ["рэп"], tmp_path, wanted=10, min_tracks=5, max_track_seconds=900, min_plays=1000
     ) == []
+
+
+def test_soundcloud_search_link_becomes_a_query():
+    """🔴 ТЗ владельца 2026-08-17: источник дан ссылкой на страницу поиска SoundCloud.
+    yt-dlp такую ссылку не умеет и падает — переводим в родной поисковый запрос."""
+    from app.sc_discovery import build_source_url
+
+    assert build_source_url("https://soundcloud.com/search?q=bandana", 40) == "scsearch40:bandana"
+
+
+def test_multiword_search_link_is_decoded():
+    from app.sc_discovery import build_source_url
+
+    url = "https://soundcloud.com/search?q=%D1%80%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9%20%D1%80%D1%8D%D0%BF"
+
+    assert build_source_url(url, 10) == "scsearch10:русский рэп"
+
+
+def test_playlist_link_is_left_alone():
+    """Ссылка на плейлист или профиль — рабочая для yt-dlp, трогать её нельзя."""
+    from app.sc_discovery import build_source_url
+
+    link = "https://soundcloud.com/user/sets/mix"
+
+    assert build_source_url(link, 40) == link

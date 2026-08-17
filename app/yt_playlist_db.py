@@ -134,8 +134,17 @@ class PlaylistQueue:
         return cursor.rowcount > 0
 
     def next_pending(self) -> PlaylistRow | None:
+        """Случайный плейлист из очереди, а не самый старый.
+
+        ТЗ владельца 2026-08-17: «сборники пускай рандомные берёт». По порядку id очередь
+        разбиралась ровно так, как её насыпал поиск: подряд шли соседние результаты одного
+        запроса, то есть самые похожие друг на друга подборки. Случайный выбор разносит их
+        и без всякой дополнительной логики делает соседние сборники разными.
+
+        Отбраковка и повторные попытки от этого не страдают: у плейлиста своё состояние в
+        строке, а не место в очереди."""
         row = self._conn.execute(
-            "SELECT * FROM yt_playlists WHERE status = ? ORDER BY id LIMIT 1",
+            "SELECT * FROM yt_playlists WHERE status = ? ORDER BY RANDOM() LIMIT 1",
             (PLAYLIST_PENDING,),
         ).fetchone()
         return _to_row(row) if row else None
