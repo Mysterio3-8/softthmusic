@@ -419,7 +419,7 @@ def build_compilation(
     return Compilation(
         video_path=video_path,
         title=title,
-        post_text=build_post_text(config, title, tracks, tracklist),
+        post_text=build_post_text(config, title, tracks),
         description=build_description(config, title, tracklist, tracks),
         tracks=tracks,
         delivery_path=delivery_path,
@@ -569,23 +569,37 @@ DEFAULT_POST_PROMO = f"""♾️ Infinity Music — вся музыка прям�
 `youtube_playlists.post_promo`, здесь только заводское значение."""
 
 
-def build_post_text(
-    config: Config, title: str, tracks: list[Track], tracklist: str = ""
-) -> str:
-    """Запись на стене: заголовок, промо-блок, треклист с таймингами.
+def build_post_text(config: Config, title: str, tracks: list[Track]) -> str:
+    """Запись на стене: НАЗВАНИЕ → промо сервиса → SEO-ключи внизу.
 
-    ТЗ владельца 2026-08-14 (шаблон прислан дословно): «без лишних тегов и надписей».
-    Поэтому из записи убраны хештеги, строка «Треков в сборнике» и служебный заголовок
-    потока — всё это лишь отодвигало вниз то, ради чего запись и открывают.
+    ТЗ владельца 2026-08-18 по живому сборнику
+    [285](https://vk.com/wall-240295467_285): «там только текст на мой сервис, название
+    и сео», «абзацы побольше, особенно сео чтобы внизу было».
 
-    Треклист теперь идёт В ЗАПИСЬ, а не только в описание ролика. Прежний довод
-    (2026-08-10: «под записью он занял бы пол-экрана») владелец снял явно: тайминги
-    и есть главная ценность сборника. В описании ролика он тоже остаётся — это разные
-    индексируемые поля VK."""
+    Треклист со СТЕНЫ убран. Он остаётся в ОПИСАНИИ ролика — это отдельное
+    индексируемое поле VK, там объём ничего не стоит и в ленте не мешает, а в записи
+    он занимал экран целиком и отодвигал вниз и промо, и ключи.
+
+    Разделитель между блоками — ПУСТАЯ строка сверх обычного абзаца, перед ключами
+    ещё шире: у промо внутри свои абзацы, и одинарного отступа было мало, чтобы блоки
+    читались как разные."""
     settings = config.youtube_playlists
+    style = config.soundcloud.post
+    artists = playlist_artists(tracks)
     promo = (settings.post_promo or DEFAULT_POST_PROMO).strip()
-    blocks = [title.strip(), promo, tracklist.strip()]
-    return "\n\n".join(block for block in blocks if block.strip())
+    seo = " ".join(
+        build_hashtags(artists, style.base_tags, style.hashtag_group, style.post_tag_limit)
+    )
+    head = BLOCK_GAP.join(block for block in (title.strip(), promo) if block.strip())
+    return f"{head}{SEO_GAP}{seo}" if seo else head
+
+
+BLOCK_GAP = "\n\n\n"
+"""Отступ между смысловыми блоками записи."""
+
+SEO_GAP = "\n\n\n\n"
+"""Отступ перед ключами. Шире остальных намеренно: ключи — служебный хвост, и владелец
+просил, чтобы они читались «внизу», а не продолжением промо."""
 
 
 def _tracklist_of(tracks: list[Track]) -> str:

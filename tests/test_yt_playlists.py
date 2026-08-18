@@ -250,27 +250,36 @@ def test_title_has_safe_fallback_without_any_usable_template():
     assert build_title(["{artists} — микс"], [], now, []) == "Музыка без цензуры 2026 — сборник"
 
 
-def test_post_text_follows_owner_template(tmp_path):
-    """Шаблон записи задан владельцем дословно 2026-08-14: заголовок, промо, тайминги.
+def test_post_text_is_title_promo_and_keys_without_the_tracklist(tmp_path):
+    """ТЗ владельца 2026-08-18: «там только текст на мой сервис, название и сео».
 
-    «Без лишних тегов и надписей» — поэтому в записи не должно остаться ни хештегов,
-    ни служебного заголовка потока, ни строки «Треков в сборнике»."""
+    Треклист с таймингами со стены убран — он остаётся в описании ролика. Служебного
+    заголовка потока и строки «Треков в сборнике» в записи по-прежнему нет."""
     config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", _tracks(), "00:00 1. Ария — Штиль")
+    text = build_post_text(config, "Плейлист 2026", _tracks())
 
     assert text.startswith("Плейлист 2026")
     assert "https://t.me/muz_damn_bot" in text
-    assert "00:00 1. Ария — Штиль" in text
-    assert "#" not in text
+    assert "00:00" not in text
+    assert "#" in text, "ключи должны быть в записи"
     assert "Треков в сборнике" not in text
     assert "♾️ Плейлисты от Infinity Music" not in text
+
+
+def test_post_keys_stand_at_the_very_bottom_with_a_wide_gap(tmp_path):
+    """«Особенно сео чтобы внизу было» — ключи последней строкой и отбиты шире прочего."""
+    config = _config(tmp_path)
+    text = build_post_text(config, "Плейлист 2026", _tracks())
+
+    assert text.rstrip().splitlines()[-1].startswith("#")
+    assert "\n\n\n\n" in text
 
 
 def test_post_text_never_carries_the_dead_bot_link(tmp_path):
     """`tgram_music_bot` не существует, а ссылка уезжала в публикации."""
     config = _config(tmp_path)
 
-    assert "tgram_music_bot" not in build_post_text(config, "Плейлист", _tracks(), "00:00 1. Х")
+    assert "tgram_music_bot" not in build_post_text(config, "Плейлист", _tracks())
 
 
 def test_invented_title_never_becomes_a_hashtag(tmp_path):
@@ -309,16 +318,19 @@ def test_description_has_timings_search_phrases_and_service(tmp_path):
     assert description.rstrip().splitlines()[-1].startswith("#")
 
 
-def test_description_keeps_search_keys_out_of_the_post(tmp_path):
-    """Запись теперь длинная (тайминги в ней), поэтому сравнивать длины бессмысленно.
-    Важно другое: поисковые ключи и теги живут ТОЛЬКО в описании ролика — в ленте оно
-    свёрнуто, а запись владелец просил держать чистой."""
+def test_tracklist_lives_only_in_the_video_description(tmp_path):
+    """Тайминги — в описании ролика, запись остаётся короткой (ТЗ 2026-08-18).
+
+    Ключи теперь есть в обоих полях, но в записи их МЕНЬШЕ: `post_tag_limit` против
+    `video_tag_limit`. Описание в ленте свёрнуто, там объём бесплатный."""
     config = _config(tmp_path)
-    text = build_post_text(config, "Плейлист 2026", _tracks(), "00:00 1. Ария — Штиль")
+    text = build_post_text(config, "Плейлист 2026", _tracks())
     description = build_description(config, "Плейлист 2026", "00:00 1. Ария — Штиль", _tracks())
 
-    assert "#" in description
-    assert "#" not in text
+    assert "00:00 1. Ария — Штиль" in description
+    assert "00:00 1. Ария — Штиль" not in text
+    assert text.count("#") <= config.soundcloud.post.post_tag_limit
+    assert description.count("#") > text.count("#")
 
 
 def test_title_names_at_most_three_artists():
