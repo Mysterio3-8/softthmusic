@@ -4,6 +4,8 @@
   sync    — обойти источники и добавить новые плейлисты в очередь
   tick    — один шаг конвейера (скачать/склеить/опубликовать один сборник)
   status  — состояние очереди в JSON
+  genres  — список жанров для кнопок бота (JSON)
+  request — заказать сборник жанра (кнопка «Сборник по жанру» в боте)
 
 Отдельный вход от `soundcloud_cli.py`: потоки независимы, и общий argparse позволил бы
 им задеть друг друга.
@@ -23,7 +25,7 @@ from app.logger import get_logger, setup_logging  # noqa: E402
 from app.notifier import Notifier  # noqa: E402
 from app.vk_client import VKClient, build_token_pool  # noqa: E402
 from app.single_run import AlreadyRunning, acquire, release  # noqa: E402
-from app.yt_playlist_db import PlaylistQueue  # noqa: E402
+from app.yt_playlist_db import MAX_PENDING_REQUESTS, PlaylistQueue  # noqa: E402
 from app.yt_playlists import sync, tick  # noqa: E402
 
 RETRY_FAILED_AFTER_HOURS = 12
@@ -42,6 +44,9 @@ def main() -> int:
     sub.add_parser("sync", help="обновить очередь плейлистов с источников")
     sub.add_parser("tick", help="один шаг конвейера")
     sub.add_parser("status", help="состояние очереди (JSON)")
+    sub.add_parser("genres", help="жанры для кнопок бота (JSON)")
+    request = sub.add_parser("request", help="заказать сборник по жанру")
+    request.add_argument("genre", help="имя жанра из списка genres")
     args = parser.parse_args()
 
     try:
@@ -57,6 +62,10 @@ def main() -> int:
             return _cmd_sync(config, playlists)
         if args.command == "status":
             return _cmd_status(playlists)
+        if args.command == "genres":
+            return _cmd_genres(config, playlists)
+        if args.command == "request":
+            return _cmd_request(config, playlists, args.genre)
         return _cmd_tick(config, playlists)
     finally:
         playlists.close()
@@ -72,6 +81,49 @@ def _cmd_sync(config: Config, playlists: PlaylistQueue) -> int:
 
 def _cmd_status(playlists: PlaylistQueue) -> int:
     print(json.dumps({"ok": True, "pending": playlists.pending_count()}, ensure_ascii=False))
+    return 0
+
+
+def _cmd_genres(config: Config, playlists: PlaylistQueue) -> int:
+    """Список жанров для кнопок. Бот не читает config софта — только этот ответ."""
+    print(json.dumps(
+        {
+            "ok": True,
+            "genres": [
+                {"name": genre.name, "query": genre.query}
+                for genre in config.soundcloud.genres
+            ],
+            "pending": playlists.pending_requests(),
+            "limit": MAX_PENDING_REQUESTS,
+        },
+        ensure_ascii=False,
+    ))
+    return 0
+
+
+def _cmd_request(config: Config, playlists: PlaylistQueue, genre: str) -> int:
+    """Поставить заказ в очередь. Сборка идёт ближайшим тиком, а не здесь: команду
+    зовёт бот, и ждать 25–30 минут ffmpeg он не может."""
+    names = [item.name for item in config.soundcloud.genres]
+    matched = next((name for name in names if name.casefold() == genre.strip().casefold()), "")
+    if not matched:
+        print(json.dumps(
+            {"ok": False, "error": f"жанр «{genre}» не найден в списке"}, ensure_ascii=False
+        ))
+        return 1
+    if not playlists.add_request(matched):
+        print(json.dumps(
+            {
+                "ok": False,
+                "error": f"уже {MAX_PENDING_REQUESTS} заказа в очереди — дождись их",
+            },
+            ensure_ascii=False,
+        ))
+        return 1
+    print(json.dumps(
+        {"ok": True, "genre": matched, "pending": playlists.pending_requests()},
+        ensure_ascii=False,
+    ))
     return 0
 
 

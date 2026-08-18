@@ -37,11 +37,17 @@ from app.track_naming import split_artists, track_key
 from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
-from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
+from app.yt_playlist_db import (
+    POST_KIND_YT_PLAYLIST,
+    SOURCE_REQUEST,
+    PlaylistQueue,
+    PlaylistRow,
+)
 from app.sc_compilation import (
     SC_URL_PREFIX,
     collect_tracks as collect_sc_tracks,
     is_sc_source,
+    genre_query,
     pick_genre,
 )
 from app.yt_source import (
@@ -150,7 +156,14 @@ def tick(
         # музыки, но брать плейлисты, а не чужие готовые видео». Повод — сборник
         # «ТОП-9: ТОП 30 ЛУЧШИХ ПЕСЕН РАДИО ENERGY…»: плейлист-донор состоял из чужих
         # компиляций, и получилась компиляция компиляций.
-        playlist = _own_compilation(config, playlists, now) or playlists.next_pending()
+        # Заказ владельца («собрать сборник по жанру») идёт ПЕРВЫМ: в очереди лежат
+        # десятки чужих плейлистов, и в общем порядке кнопка ждала бы месяц, то есть
+        # была бы бесполезной.
+        playlist = (
+            playlists.next_requested()
+            or _own_compilation(config, playlists, now)
+            or playlists.next_pending()
+        )
         if playlist is None:
             return "очередь сборников пуста"
         result, rejected = _process(config, playlists, posts, vk, notifier, playlist, now)
@@ -160,6 +173,18 @@ def tick(
 
 
 MAX_REJECTS_PER_TICK = 5
+
+REQUEST_MIN_TRACKS = 3
+"""Минимум треков в ЗАКАЗАННОМ сборнике.
+
+У автосборника минимум из конфига (12): он безымянный, и коротким выходить незачем —
+проще взять следующий плейлист. Заказ владелец ждёт конкретный, поэтому короткий
+сборник лучше отказа (решение 2026-08-18)."""
+
+
+def is_request(playlist: PlaylistRow) -> bool:
+    """Строка заказана руками из бота, а не собрана автоматом."""
+    return playlist.source == SOURCE_REQUEST
 
 
 def _own_compilation(config: Config, playlists: PlaylistQueue, now: datetime):
@@ -285,6 +310,7 @@ def _process(
         # берём следующий. Попытки тут были бы холостыми запросами к YouTube.
         playlists.reject(playlist.id, str(exc))
         log.info("Плейлист %s отбракован: %s", playlist.url, exc)
+        _notify_request_failed(notifier, playlist, str(exc))
         return f"плейлист отбракован: {exc}", True
     except VKTokenBusy as exc:
         # НЕ поломка: свободного токена нет прямо сейчас. Попытку не тратим и файлы не
@@ -294,6 +320,11 @@ def _process(
     except (YouTubeSourceError, MediaError, VKError) as exc:
         attempts = playlists.bump_attempt(playlist.id, settings.max_attempts, str(exc))
         log.error("Сборник %s (попытка %d): %s", playlist.url, attempts, exc)
+        if attempts >= settings.max_attempts:
+            # Пишем только когда попытки кончились: заказ ушёл в failed и сам уже не
+            # вернётся. О промежуточной неудаче сообщать нечего — следующий тик
+            # попробует снова.
+            _notify_request_failed(notifier, playlist, str(exc))
         return f"ошибка сборника, попытка {attempts}", False
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -301,6 +332,17 @@ def _process(
         # Каталоги сборников, брошенных убитым процессом (OOM во время рендера), свой
         # `finally` не отработали и лежат мёртвым грузом по сотне мегабайт каждый.
         cleanup_stale_workdirs(settings.work_dir, keep=work_dir)
+
+
+def _notify_request_failed(notifier: Notifier, playlist: PlaylistRow, reason: str) -> None:
+    """Сообщить владельцу, что ЗАКАЗАННЫЙ сборник не вышел.
+
+    Об успехе не пишем: готовый файл и так приходит в Telegram, а второе сообщение
+    рядом с ним — шум (решение владельца 2026-08-18). Автосборники молчат в обе
+    стороны: их владелец не заказывал и не ждёт."""
+    if not is_request(playlist):
+        return
+    notifier.send(f"🎼 {playlist.title}: сборник не собрался — {reason}")
 
 
 def build_compilation(
@@ -317,14 +359,25 @@ def build_compilation(
         # Своя подборка с SoundCloud: донора нет, треки набираются поиском.
         # Один жанр на сборник, а не всё вперемешку (ТЗ 2026-08-17 «рэп, фонк,
         # атмосферные»). Жанр запоминаем в строке очереди — он идёт в название.
-        genre = pick_genre(config.soundcloud.discovery.sources)
+        requested = is_request(playlist)
+        if requested:
+            # Заказ из бота: жанр назвал владелец, а не жребий.
+            genre = playlist.title
+            query = genre_query(config.soundcloud.genres, genre)
+        else:
+            genre = pick_genre(config.soundcloud.discovery.sources)
+            query = genre
         tracks = collect_sc_tracks(
-            [genre] if genre else config.soundcloud.discovery.sources,
+            [query] if query else config.soundcloud.discovery.sources,
             work_dir,
+            # Заказу порог популярности не применяется, а минимум треков снижен
+            # (решение владельца 2026-08-18). У узкого жанра выдача выше 100 000
+            # прослушиваний может не набраться вовсе — и нажатая кнопка молча не
+            # давала бы сборника. Лучше короткий сборник, чем ни одного.
             wanted=settings.max_tracks,
-            min_tracks=settings.min_tracks,
+            min_tracks=REQUEST_MIN_TRACKS if requested else settings.min_tracks,
             max_track_seconds=settings.max_track_seconds,
-            min_plays=config.soundcloud.discovery.min_plays,
+            min_plays=0 if requested else config.soundcloud.discovery.min_plays,
         )
         if not tracks:
             raise PlaylistUnsuitable("SoundCloud не отдал достаточно треков для сборника")

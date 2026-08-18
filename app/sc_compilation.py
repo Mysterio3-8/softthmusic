@@ -52,6 +52,17 @@ def pick_genre(sources: list[str]) -> str:
     return random.choice([s for s in sources if s.strip()]) if sources else ""
 
 
+def genre_query(genres, name: str) -> str:
+    """Поисковый запрос жанра по его имени. Нет в конфиге — ищем по самому имени.
+
+    Запас нужен, потому что список жанров правится из бота: строка заказа переживает
+    удаление жанра из конфига, и падать из-за этого сборнику незачем."""
+    for genre in genres or ():
+        if genre.name.casefold() == (name or "").casefold():
+            return genre.query or genre.name
+    return (name or "").strip()
+
+
 def collect_tracks(
     sources: list[str],
     target_dir: Path,

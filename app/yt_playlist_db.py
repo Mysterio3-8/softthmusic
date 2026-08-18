@@ -23,6 +23,17 @@ PLAYLIST_REJECTED = "rejected"
 (занятый токен, OOM, оборванная закачка), и отбракованный состав он возвращал бы вечно —
 каждый раз заново упираясь в тот же гейт."""
 
+SOURCE_REQUEST = "заказ"
+"""Метка строки, заказанной руками из бота («собрать сборник по жанру»).
+
+Отдельной таблицы у заказов нет намеренно: строка в общей очереди даёт им весь готовый
+учёт — отдан ли файл, память о вышедших песнях, защита от повторов названий, попытки.
+Второй, параллельный учёт разошёлся бы с первым."""
+
+MAX_PENDING_REQUESTS = 2
+"""Сколько заказов можно накопить. Ровно суточная квота сборников: третий заказ всё
+равно ждал бы следующей ночи, а владелец к тому времени забудет, что его делал."""
+
 POST_KIND_YT_PLAYLIST = "yt_playlist"
 
 
@@ -132,6 +143,36 @@ class PlaylistQueue:
         )
         self._conn.commit()
         return cursor.rowcount > 0
+
+    def add_request(self, genre: str, now: datetime | None = None) -> bool:
+        """Заказать сборник жанра `genre`. False — заказов уже максимум.
+
+        В `title` кладём ИМЯ жанра, а не поисковый запрос: запрос берётся из конфига в
+        момент сборки, и список жанров правится из бота — сохранённый запрос разъехался
+        бы с конфигом молча."""
+        if self.pending_requests() >= MAX_PENDING_REQUESTS:
+            return False
+        moment = now or datetime.now(timezone.utc)
+        url = f"sc:auto:{moment.strftime('%Y%m%d%H%M%S')}"
+        return self.add(url, genre, "SoundCloud", SOURCE_REQUEST)
+
+    def pending_requests(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM yt_playlists WHERE status = ? AND source = ?",
+            (PLAYLIST_PENDING, SOURCE_REQUEST),
+        ).fetchone()
+        return int(row["n"])
+
+    def next_requested(self) -> PlaylistRow | None:
+        """Заказ ПО ПОРЯДКУ нажатия, а не случайно (в отличие от `next_pending`).
+
+        Владелец помнит, какой жанр нажал первым, и ждёт именно его. Случайный порядок
+        двух заказов выглядел бы как «бот меня не послушал»."""
+        row = self._conn.execute(
+            "SELECT * FROM yt_playlists WHERE status = ? AND source = ? ORDER BY id LIMIT 1",
+            (PLAYLIST_PENDING, SOURCE_REQUEST),
+        ).fetchone()
+        return _to_row(row) if row else None
 
     def next_pending(self) -> PlaylistRow | None:
         """Случайный плейлист из очереди, а не самый старый.

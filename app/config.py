@@ -74,6 +74,18 @@ class DiscoveryConfig:
 
 
 @dataclass(frozen=True)
+class GenreConfig:
+    """Жанр для кнопки «собрать сборник по жанру» в боте (ТЗ 2026-08-18).
+
+    `name` — подпись кнопки и то, что попадёт в `{genre}` названия сборника;
+    `query` — поисковый запрос к SoundCloud. Разделены потому, что кликабельное
+    «Фонк» и рабочий запрос «фонк русский» — разные строки."""
+
+    name: str
+    query: str
+
+
+@dataclass(frozen=True)
 class SoundCloudConfig:
     """Настройки альбомного потока. Антибан-имена совпадают с контрактом менеджера."""
 
@@ -86,6 +98,9 @@ class SoundCloudConfig:
     work_dir: Path
     post: PostStyle
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+    genres: list[GenreConfig] = field(default_factory=list)
+    """Список жанров для ручного заказа сборника. Пуст → кнопка в боте пустая,
+    автоматический поток от этого не меняется."""
 
 
 @dataclass(frozen=True)
@@ -313,6 +328,7 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
         work_dir=Path(raw.get("work_dir", "downloads/soundcloud")),
         post=_build_post_style(raw.get("post") or {}),
         discovery=_build_discovery(raw.get("discovery") or {}),
+        genres=_build_genres(raw.get("genres") or []),
     )
 
 
@@ -331,6 +347,23 @@ def _build_discovery(raw: dict) -> DiscoveryConfig:
         limit_per_source=int(raw.get("limit_per_source", 40)),
         min_plays=int(raw.get("min_plays", 100_000)),
     )
+
+
+def _build_genres(raw: list) -> list[GenreConfig]:
+    """Жанры кнопок. Строка = имя и запрос сразу; словарь — раздельно.
+
+    Простая строка поддержана намеренно: список правится из бота, и заставлять
+    владельца писать там YAML-словарь значило бы сломать редактирование."""
+    genres: list[GenreConfig] = []
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            query = str(item.get("query", "")).strip() or name
+        else:
+            name = query = str(item).strip()
+        if name:
+            genres.append(GenreConfig(name=name, query=query))
+    return genres
 
 
 def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
