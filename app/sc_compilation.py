@@ -26,6 +26,7 @@ from pathlib import Path
 from app.logger import get_logger
 from app.sc_discovery import collect_new_tracks
 from app.soundcloud import Track, download_track
+from app.track_naming import clean_artist, clean_title, usable_track
 
 SC_URL_PREFIX = "sc:auto:"
 """Метка синтетического плейлиста в очереди.
@@ -85,7 +86,9 @@ def collect_tracks(
         sources,
         known_urls=set(),
         known_names=known_names,
-        wanted=wanted * 2,
+        # Запас ВТРОЕ, а не вдвое: с 2026-08-18 к обычным потерям (DRM, битые ссылки)
+        # добавился отсев по именам, и на мусорной выдаче он режет заметную долю.
+        wanted=wanted * 3,
         min_plays=min_plays,
     )
     if not refs:
@@ -96,6 +99,17 @@ def collect_tracks(
     for ref in refs:
         if len(tracks) >= wanted:
             break
+        # 🔴 Гейт имён (ТЗ владельца 2026-08-18 по сборнику 285). В треклист попадали
+        # «New Russian Rap Music — Батальон Морской Пехоты», «⊹ — ВАЙБ 2025 (ФОНК…)»,
+        # «**** — icarus. - Русский Фонк». Для очереди ТРЕКОВ такие находки терпимы —
+        # там подпись поста собирается иначе, — а в сборнике имена видны списком, и
+        # мусор в них читается как поломка софта.
+        if not ref.artist_from_title:
+            log.info("Трек «%s» без разделителя «артист — песня» — пропускаю", ref.title)
+            continue
+        if not usable_track(ref.artist, ref.title):
+            log.info("Трек «%s — %s» не похож на песню — пропускаю", ref.artist, ref.title)
+            continue
         # Дедуп внутри ОДНОГО сборника: два перезалива одного хита рядом в треклисте
         # выглядят как поломка, хотя ссылки у них разные.
         name_key = f"{ref.artist.lower().strip()}|{ref.title.lower().strip()}"
@@ -115,11 +129,15 @@ def collect_tracks(
         seen_names.add(name_key)
         # Позиция задаётся ЗДЕСЬ, а не берётся из download_track: у него каждый трек
         # приходит одиночным и получает позицию 1, а нумерация в треклисте сквозная.
+        # 🔴 Имена берём РАЗОБРАННЫЕ (из ref), а не сырые из `download_track`. Там
+        # `artist` — это `uploader`, то есть паблик-перезаливщик, а `title` — полное
+        # название ролика с хвостами. Ровно они и уехали на стену 2026-08-18, хотя
+        # разобранная пара всё это время лежала рядом.
         tracks.append(
             Track(
                 position=len(tracks) + 1,
-                title=track.title,
-                artist=track.artist,
+                title=clean_title(ref.title),
+                artist=clean_artist(ref.artist),
                 duration_s=track.duration_s,
                 audio_path=track.audio_path,
                 cover_path=track.cover_path,

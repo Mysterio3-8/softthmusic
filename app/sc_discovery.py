@@ -31,7 +31,7 @@ import yt_dlp
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.logger import get_logger
-from app.track_naming import split_artist_title
+from app.track_naming import has_artist_separator, split_artist_title
 
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
@@ -56,6 +56,13 @@ class TrackRef:
     artist: str
     plays: int
     russian: bool
+    artist_from_title: bool = True
+    """Исполнитель взят из НАЗВАНИЯ ролика, а не из загрузчика.
+
+    False означает «в названии не было разделителя, и артистом стал паблик-
+    перезаливщик». Для очереди треков это терпимо (подпись поста собирается иначе), а
+    в треклист сборника такое имя попадать не должно — 2026-08-18 владелец увидел там
+    «New Russian Rap Music — Батальон Морской Пехоты»."""
 
 
 def build_source_url(source: str, limit: int) -> str:
@@ -141,6 +148,7 @@ def _to_ref(entry: dict | None) -> TrackRef | None:
         artist=artist,
         plays=int(entry.get("view_count") or 0),
         russian=bool(_CYRILLIC.search(f"{title} {artist}")),
+        artist_from_title=has_artist_separator(entry.get("title") or ""),
     )
 
 

@@ -10,11 +10,11 @@ from app.sc_discovery import TrackRef
 from app.soundcloud import Track
 
 
-def _ref(url: str, artist: str = "Артист", title: str = "Трек") -> TrackRef:
+def _ref(url: str, artist: str = "Артист", title: str = "Штиль") -> TrackRef:
     return TrackRef(url=url, title=title, artist=artist, plays=500_000, russian=True)
 
 
-def _track(seconds: int, artist: str = "Артист", title: str = "Трек") -> Track:
+def _track(seconds: int, artist: str = "Артист", title: str = "Штиль") -> Track:
     return Track(
         position=1,
         title=title,
@@ -35,7 +35,7 @@ def test_tracks_are_numbered_consecutively(monkeypatch, tmp_path):
     нумерация сквозная — иначе тайминги в описании не сойдутся."""
     monkeypatch.setattr(
         "app.sc_compilation.collect_new_tracks",
-        lambda *a, **k: [_ref(f"u{i}", title=f"Трек {i}") for i in range(5)],
+        lambda *a, **k: [_ref(f"u{i}", title=f"Штиль {i}") for i in range(5)],
     )
     monkeypatch.setattr("app.sc_compilation.download_track", lambda url, d: _track(200))
 
@@ -50,12 +50,12 @@ def test_hour_long_mix_is_dropped_here_too(monkeypatch, tmp_path):
     """Часовой микс одинаково вреден независимо от того, откуда он приехал."""
     monkeypatch.setattr(
         "app.sc_compilation.collect_new_tracks",
-        lambda *a, **k: [_ref(f"u{i}", title=f"Трек {i}") for i in range(6)],
+        lambda *a, **k: [_ref(f"u{i}", title=f"Штиль {i}") for i in range(6)],
     )
     calls = iter([3600, 200, 200, 200, 200, 200])
     monkeypatch.setattr(
         "app.sc_compilation.download_track",
-        lambda url, d: _track(next(calls), title=f"Трек {url}"),
+        lambda url, d: _track(next(calls), title=f"Штиль {url}"),
     )
 
     tracks = collect_tracks(
@@ -70,7 +70,7 @@ def test_undownloadable_track_does_not_break_the_batch(monkeypatch, tmp_path):
     """Часть треков SoundCloud отдаёт под DRM — это норма, а не поломка."""
     monkeypatch.setattr(
         "app.sc_compilation.collect_new_tracks",
-        lambda *a, **k: [_ref(f"u{i}", title=f"Трек {i}") for i in range(6)],
+        lambda *a, **k: [_ref(f"u{i}", title=f"Штиль {i}") for i in range(6)],
     )
     state = {"n": 0}
 
@@ -78,7 +78,7 @@ def test_undownloadable_track_does_not_break_the_batch(monkeypatch, tmp_path):
         state["n"] += 1
         if state["n"] == 1:
             raise RuntimeError("This video is DRM protected")
-        return _track(200, title=f"Трек {url}")
+        return _track(200, title=f"Штиль {url}")
 
     monkeypatch.setattr("app.sc_compilation.download_track", flaky)
 
@@ -95,12 +95,12 @@ def test_duplicate_reuploads_are_not_taken_twice(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "app.sc_compilation.collect_new_tracks",
         lambda *a, **k: [_ref(f"u{i}", artist="Баста", title="Сансара") for i in range(4)]
-        + [_ref("u9", artist="Другой", title="Песня")],
+        + [_ref("u9", artist="Скриптонит", title="Утекай")],
     )
     monkeypatch.setattr(
         "app.sc_compilation.download_track",
-        lambda url, d: _track(200, artist="Баста" if url != "u9" else "Другой",
-                              title="Сансара" if url != "u9" else "Песня"),
+        lambda url, d: _track(200, artist="Баста" if url != "u9" else "Скриптонит",
+                              title="Сансара" if url != "u9" else "Утекай"),
     )
 
     tracks = collect_tracks(

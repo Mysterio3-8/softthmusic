@@ -112,6 +112,66 @@ def split_artist_title(title: str, uploader: str) -> tuple[str, str]:
     return clean_artist(uploader), clean_title(raw)
 
 
+_LETTERS = re.compile(r"[A-Za-zА-Яа-яЁё]{2,}")
+"""Хоть какое-то слово из букв. «⊹», «****», «💀» именем исполнителя быть не могут."""
+
+_LABEL_WORDS = frozenset(
+    """
+    фонк phonk дрифт drift рэп реп rap rus хип хоп hip hop поп pop рок rock
+    шансон лирика лирические лирический клубный клубная клубное клуб club
+    танцевальная танцевальный танцы dance techno house хаус транс trance
+    музыка music песни песня треки трек mix микс микстейп сборник плейлист playlist
+    русский русская русские русское российский best top топ лучшие лучший новинки
+    новинка nonstop без цензуры года год сезона vibe вайб bass boosted slowed
+    """.split()
+)
+"""Слова, из которых состоит ЯРЛЫК подборки, а не имя песни.
+
+Живой сборник 2026-08-18: в треклист попали «Русский Фонк», «русский реп 2024 - best
+russian war rap 2024», «ВАЙБ 2025 ( ФОНК, Бразильский фонк, РУССКИЙ ФОНК )». Это не
+названия треков — это SEO-подписи перезаливщиков. Отдельно каждое слово встречается и
+в честных названиях, поэтому отбраковываем только строку, где ДРУГИХ слов нет вовсе."""
+
+
+def is_music_label(text: str) -> bool:
+    """Строка целиком состоит из жанровых и служебных слов («Русский Фонк», «ВАЙБ 2025»).
+
+    Проверка «все слова служебные», а не «есть служебное слово»: песня «Фонк для мамы»
+    жанровое слово содержит, но названием быть не перестаёт."""
+    words = [word for word in re.split(r"[^A-Za-zА-Яа-яЁё0-9]+", text or "") if word]
+    meaningful = [word for word in words if not word.isdigit()]
+    if not meaningful:
+        return True
+    return all(word.casefold() in _LABEL_WORDS for word in meaningful)
+
+
+def has_artist_separator(title: str) -> bool:
+    """Есть ли в названии ролика разделитель «Артист — Песня».
+
+    Без него исполнителем становится ЗАГРУЗЧИК, а он на SoundCloud — паблик-
+    перезаливщик («New Russian Rap Music»). В треклисте это выглядит как имя артиста,
+    хотя им не является."""
+    raw = (title or "").strip()
+    return any(
+        found and before.strip() and after.strip()
+        for before, found, after in (raw.partition(sep) for sep in _SEPARATORS)
+    )
+
+
+def usable_track(artist: str, title: str) -> bool:
+    """Годится ли пара «артист — песня» для треклиста сборника.
+
+    Отбраковываем ровно то, что владелец увидел на стене 2026-08-18: имена без букв
+    («****», «⊹»), жанровые ярлыки вместо названия, повтор артиста в названии
+    («Glock Thrill Phonk — Glock Thrill Phonk»)."""
+    artist, title = clean_artist(artist), clean_title(title)
+    if not _LETTERS.search(artist) or not _LETTERS.search(title):
+        return False
+    if is_music_label(artist) or is_music_label(title):
+        return False
+    return artist.casefold() != title.casefold()
+
+
 def track_key(artist: str, title: str) -> str:
     """Ключ песни для памяти «это уже выходило».
 
