@@ -19,7 +19,13 @@ from app.album_db import (
     AlbumQueue,
     AlbumRow,
 )
-from app.album_scheduler import is_quiet_hour, next_publish_moment, now_msk, to_msk
+from app.album_scheduler import (
+    is_quiet_hour,
+    next_publish_moment,
+    now_msk,
+    to_msk,
+    window_start,
+)
 from app.config import Config
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
@@ -56,7 +62,7 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
     now = to_msk(now) if now else now_msk()
     settings = config.soundcloud
 
-    if _daily_limit_reached(queue, settings.max_posts_per_day, now):
+    if _daily_limit_reached(queue, settings.max_posts_per_day, now, settings):
         return "суточный лимит постов исчерпан"
 
     # Ночь проверяется ДО ветвления: сборник — такая же запись в сообществе, как
@@ -86,11 +92,26 @@ def tick(config: Config, queue: AlbumQueue, vk: VKClient, notifier: Notifier,
     return _start_album(config, queue, vk, notifier, album, now)
 
 
-def _daily_limit_reached(queue: AlbumQueue, max_posts_per_day: int, now: datetime) -> bool:
-    """Считаем только СВОИ записи: у сборников с YouTube свой лимит и свой счётчик,
-    иначе два потока в одном сообществе съедали бы квоту друг друга."""
+def _daily_limit_reached(
+    queue: AlbumQueue, max_posts_per_day: int, now: datetime, settings=None
+) -> bool:
+    """Исчерпан ли лимит В ТЕКУЩЕМ ОКНЕ.
+
+    Считаем только СВОИ записи: у сборников с YouTube свой лимит и свой счётчик, иначе
+    два потока в одном сообществе съедали бы квоту друг друга.
+
+    🔴 Раньше считалось скользящими сутками, и при окне короче 24 часов это давало
+    МЕНЬШЕ публикаций, чем в лимите: вчерашние посты ещё внутри суток, счётчик полон,
+    день пропускается. На сборниках это уже стоило простоя (`yt_playlists`), у треков
+    грабля лежала та же и выстрелила бы вместе с расширением окна 2026-08-18.
+
+    `settings=None` оставлено для прежних вызовов: без окна поведение ровно старое."""
     kinds = (POST_KIND_ALBUM, POST_KIND_TRACK)
-    return queue.posts_since(now - timedelta(days=1), kinds) >= max_posts_per_day
+    if settings is None:
+        since = now - timedelta(days=1)
+    else:
+        since = window_start(now, settings.quiet_start_hour, settings.quiet_end_hour)
+    return queue.posts_since(since, kinds) >= max_posts_per_day
 
 
 def _start_album(

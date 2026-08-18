@@ -43,6 +43,28 @@ def is_quiet_hour(moment: datetime, quiet_start_hour: int, quiet_end_hour: int) 
     return hour >= quiet_start_hour or hour < quiet_end_hour
 
 
+def window_start(now: datetime, quiet_start_hour: int, quiet_end_hour: int) -> datetime:
+    """Когда открылось ТЕКУЩЕЕ рабочее окно софта (в МСК).
+
+    Рабочее окно — это `[quiet_end, quiet_start)`: тишина задаётся конфигом, работа —
+    то, что осталось. Окно на все сутки (тишины нет) → начало суток.
+
+    Зона входного момента СОХРАНЯЕТСЯ, а не приводится к МСК: вызывающие уже дают
+    московское время, а лишнее приведение сделало бы наивный вход осведомлённым и
+    сломало бы сравнение с наивными датами у вызывающих.
+
+    🔴 От этого момента обязан считаться суточный лимит ОБОИХ потоков. Скользящие сутки
+    при окне короче 24 часов дают не «N публикаций в сутки», а меньше: вчерашние посты
+    ещё внутри 24 часов, счётчик уже полон, и день пропускается целиком. На сборниках
+    это стоило суток простоя (август 2026), у треков грабля была той же."""
+    if quiet_start_hour == quiet_end_hour:
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    opened = now.replace(hour=quiet_end_hour % 24, minute=0, second=0, microsecond=0)
+    if opened > now:
+        opened -= timedelta(days=1)
+    return opened
+
+
 def next_publish_moment(
     now: datetime,
     min_interval_minutes: int,

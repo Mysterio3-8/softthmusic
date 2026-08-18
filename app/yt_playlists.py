@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.album_db import AlbumQueue
-from app.album_scheduler import is_quiet_hour, now_msk, to_msk
+from app.album_scheduler import is_quiet_hour, now_msk, to_msk, window_start as _window_start
 from app.config import Config
 from app.delivery import cleanup_ready, deliver
 from app.logger import get_logger
@@ -210,17 +210,9 @@ def _own_compilation(config: Config, playlists: PlaylistQueue, now: datetime):
     return playlists.next_pending()
 
 
-def window_start(now: datetime, quiet_start_hour: int, quiet_end_hour: int) -> datetime:
-    """Когда открылось ТЕКУЩЕЕ рабочее окно софта (в МСК).
-
-    Рабочее окно — это `[quiet_end, quiet_start)`: тишина задаётся конфигом, работа — то,
-    что осталось. Окно на все сутки (тишины нет) → начало суток."""
-    if quiet_start_hour == quiet_end_hour:
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    opened = now.replace(hour=quiet_end_hour % 24, minute=0, second=0, microsecond=0)
-    if opened > now:
-        opened -= timedelta(days=1)
-    return opened
+window_start = _window_start
+"""Начало текущего рабочего окна. Живёт в `album_scheduler` — им пользуются ОБА потока,
+и две копии этой арифметики разъехались бы ровно так же, как разъезжались настройки."""
 
 
 def _daily_limit_reached(

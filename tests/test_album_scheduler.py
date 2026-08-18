@@ -114,3 +114,52 @@ def test_seven_posts_a_day_fit_into_the_configured_interval():
         count += 1
 
     assert count >= 7, f"расписание не дотягивает до 7 постов в сутки: {count}"
+
+
+def test_track_quota_is_counted_from_the_window_opening():
+    """Та же грабля, что стоила сборникам суток простоя, лежала и у ТРЕКОВ.
+
+    Окно 08:00-01:00 МСК: скользящие сутки считали бы вчерашние публикации внутри
+    24 часов, счётчик был бы полон, и день пропускался целиком. Граница обязана быть
+    открытием окна."""
+    from datetime import datetime
+
+    from app.album_publisher import _daily_limit_reached
+
+    class _Settings:
+        quiet_start_hour = 1
+        quiet_end_hour = 8
+
+    class _Posts:
+        def __init__(self):
+            self.boundary = None
+
+        def posts_since(self, moment, kinds=None):
+            self.boundary = moment
+            return 0
+
+    posts = _Posts()
+    _daily_limit_reached(posts, 2, datetime(2026, 8, 18, 9, 0), _Settings)
+
+    assert posts.boundary == datetime(2026, 8, 18, 8, 0)
+
+
+def test_track_quota_without_window_stays_on_the_rolling_day():
+    """Старый вызов без окна обязан работать ровно как раньше."""
+    from datetime import datetime, timedelta
+
+    from app.album_publisher import _daily_limit_reached
+
+    class _Posts:
+        def __init__(self):
+            self.boundary = None
+
+        def posts_since(self, moment, kinds=None):
+            self.boundary = moment
+            return 0
+
+    posts = _Posts()
+    now = datetime(2026, 8, 18, 9, 0)
+    _daily_limit_reached(posts, 2, now)
+
+    assert posts.boundary == now - timedelta(days=1)
