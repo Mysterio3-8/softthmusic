@@ -293,3 +293,25 @@ def test_playlists_are_taken_in_random_order(tmp_path):
 
     assert len(picked) > 1, "выбор не случайный — всегда один и тот же плейлист"
     queue.close()
+
+
+def test_foreign_ready_made_compilation_is_not_a_track():
+    """🔴 Жалоба владельца 2026-08-17: «ты взял чужой сборник уже готовый». Плейлист-донор
+    состоял не из песен, а из чужих компиляций — и вышла компиляция компиляций
+    «ТОП-9: ТОП 30 ЛУЧШИХ ПЕСЕН РАДИО ENERGY…»."""
+    entries = [
+        PlaylistEntry(index=1, title="ТОП 30 ЛУЧШИХ ПЕСЕН РАДИО ENERGY | ХИТЫ NRG", duration_s=600),
+        PlaylistEntry(index=2, title="Лучшие песни 2026 подряд", duration_s=700),
+        PlaylistEntry(index=3, title="Егор Крид - MALO 2.0", duration_s=200),
+    ]
+
+    chosen = select_entries(entries, max_track_seconds=900)
+
+    assert [entry.index for entry in chosen] == [3]
+
+
+def test_remix_is_a_track_not_a_compilation():
+    """«mix» только по границам слова: иначе «Песня (Remix)» улетала бы в отсев."""
+    entries = [PlaylistEntry(index=1, title="Xcho - Уйду (Remix)", duration_s=200)]
+
+    assert len(select_entries(entries, max_track_seconds=900)) == 1
