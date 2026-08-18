@@ -121,8 +121,9 @@ _LABEL_WORDS = frozenset(
     шансон лирика лирические лирический клубный клубная клубное клуб club
     танцевальная танцевальный танцы dance techno house хаус транс trance
     музыка music песни песня треки трек mix микс микстейп сборник плейлист playlist
-    русский русская русские русское российский best top топ лучшие лучший новинки
-    новинка nonstop без цензуры года год сезона vibe вайб bass boosted slowed
+    русский русская русские русское российский russian rus best top топ лучшие лучший
+    новинки новинка nonstop без цензуры года год сезона vibe вайб bass boosted slowed
+    official audio video music премьера сборники подборка hits хиты
     """.split()
 )
 """Слова, из которых состоит ЯРЛЫК подборки, а не имя песни.
@@ -134,15 +135,21 @@ russian war rap 2024», «ВАЙБ 2025 ( ФОНК, Бразильский фо�
 
 
 def is_music_label(text: str) -> bool:
-    """Строка целиком состоит из жанровых и служебных слов («Русский Фонк», «ВАЙБ 2025»).
+    """Строка — ЯРЛЫК подборки, а не название песни.
 
-    Проверка «все слова служебные», а не «есть служебное слово»: песня «Фонк для мамы»
-    жанровое слово содержит, но названием быть не перестаёт."""
+    Считаем долю служебных слов, а не «все ли они служебные». Правило «все» проверку
+    живого мусора не прошло: «русский реп 2024 - best russian war rap 2024» содержит
+    посторонние слова («war») и потому пролезало целиком.
+
+    Порог — СТРОГО больше половины. Ровно половина оставлена честным названиям вида
+    «Русский вальс» и «Танцы минус»: одно жанровое слово из двух — это ещё название.
+    Годы не считаем вовсе: «2024» не говорит ни за, ни против."""
     words = [word for word in re.split(r"[^A-Za-zА-Яа-яЁё0-9]+", text or "") if word]
     meaningful = [word for word in words if not word.isdigit()]
     if not meaningful:
         return True
-    return all(word.casefold() in _LABEL_WORDS for word in meaningful)
+    labels = sum(1 for word in meaningful if word.casefold() in _LABEL_WORDS)
+    return labels * 2 > len(meaningful)
 
 
 def has_artist_separator(title: str) -> bool:

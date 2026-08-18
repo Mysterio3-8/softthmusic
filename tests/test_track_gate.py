@@ -45,11 +45,25 @@ def test_genre_labels_are_recognised(text):
 
 @pytest.mark.parametrize(
     "text",
-    ["На Берегу Днепра", "Штиль", "Фонк для мамы", "Big Baby Tape", "MALO 2.0"],
+    [
+        "На Берегу Днепра",
+        "Штиль",
+        "Фонк для мамы",
+        "Big Baby Tape",
+        "MALO 2.0",
+        "Русский вальс",   # ровно половина слов служебные — это ещё название
+        "Танцы минус",
+    ],
 )
 def test_real_names_are_not_labels(text):
     """Жанровое слово внутри честного названия — не повод его выбрасывать."""
     assert not is_music_label(text)
+
+
+def test_keyword_soup_with_a_stray_word_is_still_a_label():
+    """🔴 Живая дыра первой версии: правило «ВСЕ слова служебные» пропускало эту строку
+    целиком из-за постороннего «war», и трек уезжал в сборник."""
+    assert is_music_label("русский реп 2024 - best russian war rap 2024")
 
 
 # --- пригодность пары ---------------------------------------------------------
