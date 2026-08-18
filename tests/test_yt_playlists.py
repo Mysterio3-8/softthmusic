@@ -435,3 +435,23 @@ def test_quota_without_settings_stays_on_rolling_day():
     _daily_limit_reached(posts, 2, now)
 
     assert posts.boundary == now - timedelta(days=1)
+
+
+def test_genre_title_is_capitalised():
+    """Жанр приходит поисковым запросом («фонк»), а в заголовке стоит первым словом."""
+    from app.yt_playlists import render_title
+
+    title = render_title("{genre} — ТОП-{count} треков", datetime(2026, 8, 17), [], 15, "фонк")
+
+    assert title == "Фонк — ТОП-15 треков"
+
+
+def test_genre_templates_are_skipped_without_a_genre():
+    """У чужого плейлиста жанра нет — шаблон с {genre} дал бы заголовок с дырой."""
+    from app.yt_playlists import choose_title_template
+
+    chosen = choose_title_template(
+        ["{genre} — ТОП-{count}", "ТОП-{count} треков"], [], datetime(2026, 8, 17), [], 15, ""
+    )
+
+    assert chosen == "ТОП-{count} треков"

@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 from app.logger import get_logger
@@ -36,6 +37,19 @@ SC_URL_PREFIX = "sc:auto:"
 
 def is_sc_source(url: str) -> bool:
     return (url or "").startswith(SC_URL_PREFIX)
+
+
+def pick_genre(sources: list[str]) -> str:
+    """Один источник = один ЖАНР сборника.
+
+    ТЗ владельца 2026-08-17: «можно сделать рэп плейлисты, фонк плейлисты, атмосферные —
+    по жанрам». Раньше все источники сливались в один котёл, и подборка выходила
+    винегретом: рэп вперемешку с попсой. Тематический сборник и слушается лучше, и в
+    поиске находится по своему запросу.
+
+    Список жанров правится ИЗ БОТА (📦 Софты → 📥 Источники): это те же
+    `soundcloud.discovery.sources`, которые накрывает контракт менеджера."""
+    return random.choice([s for s in sources if s.strip()]) if sources else ""
 
 
 def collect_tracks(

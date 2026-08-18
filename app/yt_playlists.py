@@ -38,7 +38,12 @@ from app.tg_uploader import TelegramUploader
 from app.vk_client import VKClient, VKError, VKTokenBusy
 from app.workdir_cleanup import cleanup_stale_workdirs
 from app.yt_playlist_db import POST_KIND_YT_PLAYLIST, PlaylistQueue, PlaylistRow
-from app.sc_compilation import SC_URL_PREFIX, collect_tracks as collect_sc_tracks, is_sc_source
+from app.sc_compilation import (
+    SC_URL_PREFIX,
+    collect_tracks as collect_sc_tracks,
+    is_sc_source,
+    pick_genre,
+)
 from app.yt_source import (
     PlaylistUnsuitable,
     YouTubeSourceError,
@@ -307,10 +312,14 @@ def build_compilation(
 ) -> Compilation:
     """Скачать треки, собрать видео и все тексты. Без сети VK — тестируется отдельно."""
     settings = config.youtube_playlists
+    genre = ""
     if is_sc_source(playlist.url):
         # Своя подборка с SoundCloud: донора нет, треки набираются поиском.
+        # Один жанр на сборник, а не всё вперемешку (ТЗ 2026-08-17 «рэп, фонк,
+        # атмосферные»). Жанр запоминаем в строке очереди — он идёт в название.
+        genre = pick_genre(config.soundcloud.discovery.sources)
         tracks = collect_sc_tracks(
-            config.soundcloud.discovery.sources,
+            [genre] if genre else config.soundcloud.discovery.sources,
             work_dir,
             wanted=settings.max_tracks,
             min_tracks=settings.min_tracks,
@@ -333,9 +342,10 @@ def build_compilation(
 
     artists = playlist_artists(tracks)
     template = choose_title_template(
-        settings.title_templates, playlists.recent_titles(20), now, artists, len(tracks)
+        settings.title_templates, playlists.recent_titles(20), now, artists,
+        len(tracks), genre,
     )
-    title = render_title(template, now, artists, len(tracks))
+    title = render_title(template, now, artists, len(tracks), genre)
     video_path, delivery_path = _render(tracks, work_dir, settings.tg_max_tracks)
     tracklist = _tracklist_of(tracks)
     delivery_description = ""
@@ -347,7 +357,7 @@ def build_compilation(
         # Название то же, но с числом треков ОТДАННОГО файла: «ТОП-15» на файле из
         # восьми песен — то же расхождение, из-за которого поехали тайминги.
         short_title = render_title(
-            template, now, playlist_artists(short_tracks), len(short_tracks)
+            template, now, playlist_artists(short_tracks), len(short_tracks), genre
         )
         delivery_description = build_description(
             config, short_title, _tracklist_of(short_tracks), short_tracks
@@ -371,6 +381,7 @@ def build_title(
     now: datetime,
     artists: list[str] | None = None,
     count: int = 0,
+    genre: str = "",
 ) -> str:
     """Название собирается с нуля — название донора не берётся даже частично, чтобы
     в сообщество не утёк чужой брендинг.
@@ -388,8 +399,8 @@ def build_title(
 
     Уже использованные недавно варианты не берём; все заняты — берём любой, потому что
     сборник без названия хуже, чем сборник с повторным."""
-    template = choose_title_template(templates, recent, now, artists, count)
-    return render_title(template, now, artists, count)
+    template = choose_title_template(templates, recent, now, artists, count, genre)
+    return render_title(template, now, artists, count, genre)
 
 
 TITLE_ARTIST_LIMIT = 3
@@ -414,7 +425,11 @@ MONTHS_PREPOSITIONAL = (
 
 
 def render_title(
-    template: str, now: datetime, artists: list[str] | None = None, count: int = 0
+    template: str,
+    now: datetime,
+    artists: list[str] | None = None,
+    count: int = 0,
+    genre: str = "",
 ) -> str:
     """Подставляет значения в шаблон названия.
 
@@ -432,6 +447,9 @@ def render_title(
             month_in=MONTHS_PREPOSITIONAL[now.month - 1],
             artists=joined,
             count=count,
+            # Жанр приходит поисковым запросом («фонк»), а в заголовке он часто стоит
+            # первым словом — с маленькой буквы это читается как опечатка.
+            genre=(genre[:1].upper() + genre[1:]) if genre else "",
         ).split()
     )
 
@@ -442,6 +460,7 @@ def choose_title_template(
     now: datetime,
     artists: list[str] | None = None,
     count: int = 0,
+    genre: str = "",
 ) -> str:
     """Выбирает шаблон, избегая недавно использованных названий."""
     if not templates:
@@ -449,14 +468,16 @@ def choose_title_template(
     usable = [
         template
         for template in templates
-        if (artists or "{artists}" not in template) and (count or "{count}" not in template)
+        if (artists or "{artists}" not in template)
+        and (count or "{count}" not in template)
+        and (genre or "{genre}" not in template)
     ]
     if not usable:  # все шаблоны требуют того, чего у нас нет
         return "Музыка без цензуры {year} — сборник"
     unused = [
         template
         for template in usable
-        if render_title(template, now, artists, count) not in recent
+        if render_title(template, now, artists, count, genre) not in recent
     ]
     return random.choice(unused or usable)
 
