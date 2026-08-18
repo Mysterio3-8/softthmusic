@@ -32,6 +32,7 @@ from app.notifier import Notifier
 from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
 from app.seo import build_hashtags, build_search_tags
+from app.seo_engine import SeoParams, build_pack as build_seo_pack
 from app.soundcloud import Track
 from app.track_naming import split_artists, track_key
 from app.tg_uploader import TelegramUploader
@@ -386,11 +387,16 @@ def build_compilation(
     _ensure_own_covers(tracks)
 
     artists = playlist_artists(tracks)
-    template = choose_title_template(
-        settings.title_templates, playlists.recent_titles(20), now, artists,
-        len(tracks), genre,
-    )
-    title = render_title(template, now, artists, len(tracks), genre)
+    recent = tuple(playlists.recent_titles(20))
+    seo = _seo_pack(config, genre, artists, len(tracks), now, recent)
+    if seo is not None:
+        template = ""
+        title = seo.title
+    else:
+        template = choose_title_template(
+            settings.title_templates, list(recent), now, artists, len(tracks), genre,
+        )
+        title = render_title(template, now, artists, len(tracks), genre)
     video_path, delivery_path = _render(tracks, work_dir, settings.tg_max_tracks)
     tracklist = _tracklist_of(tracks)
     delivery_description = ""
@@ -401,23 +407,57 @@ def build_compilation(
         short_tracks = tracks[: settings.tg_max_tracks]
         # Название то же, но с числом треков ОТДАННОГО файла: «ТОП-15» на файле из
         # восьми песен — то же расхождение, из-за которого поехали тайминги.
-        short_title = render_title(
-            template, now, playlist_artists(short_tracks), len(short_tracks), genre
+        short_title = (
+            _short_title(config, seo, short_tracks, genre, now)
+            if seo is not None
+            else render_title(
+                template, now, playlist_artists(short_tracks), len(short_tracks), genre
+            )
         )
         delivery_description = build_description(
-            config, short_title, _tracklist_of(short_tracks), short_tracks
+            config, short_title, _tracklist_of(short_tracks), short_tracks, seo
         )
 
     return Compilation(
         video_path=video_path,
         title=title,
         post_text=build_post_text(config, title, tracks),
-        description=build_description(config, title, tracklist, tracks),
+        description=build_description(config, title, tracklist, tracks, seo),
         tracks=tracks,
         delivery_path=delivery_path,
         delivery_tracks=settings.tg_max_tracks if delivery_path else 0,
         delivery_description=delivery_description,
     )
+
+
+def _seo_pack(config: Config, genre: str, artists, count: int, now, recent):
+    """SEO-пакет сборника или None, если движок выключен.
+
+    Тумблер (`youtube_playlists.seo_engine`) оставлен намеренно: движок меняет ВСЕ
+    заголовки разом, и откат к прежним шаблонам должен быть одной строкой конфига, а
+    не откатом релиза."""
+    if not config.youtube_playlists.seo_engine:
+        return None
+    return build_seo_pack(
+        SeoParams(
+            genre=genre,
+            artists=tuple(artists or ()),
+            count=count,
+            year=now.year,
+        ),
+        recent=recent,
+    )
+
+
+def _short_title(config: Config, seo, short_tracks, genre: str, now) -> str:
+    """Заголовок ОТДАННОГО в Telegram файла: тот же жанр, но своё число треков.
+
+    Пересобираем, а не режем готовый: «ТОП-15» на файле из восьми песен — ровно то
+    расхождение, из-за которого у владельца уже разъезжались тайминги."""
+    pack = _seo_pack(
+        config, genre, playlist_artists(short_tracks), len(short_tracks), now, (seo.title,)
+    )
+    return pack.title if pack is not None else seo.title
 
 
 def build_title(
@@ -603,11 +643,17 @@ def _tracklist_of(tracks: list[Track]) -> str:
     )
 
 
-def build_description(config: Config, title: str, tracklist: str, tracks: list[Track]) -> str:
+def build_description(
+    config: Config, title: str, tracklist: str, tracks: list[Track], seo=None
+) -> str:
     """Описание видеозаписи — большое: описание сборника, тайминги, ключи, сервис, теги.
 
     В ленте VK описание свёрнуто, поэтому объём тут бесплатный, а поиск (и внутренний
-    VK, и внешние Google/Яндекс) читает его целиком."""
+    VK, и внешние Google/Яндекс) читает его целиком.
+
+    `seo` — пакет SEO-движка. С ним первый абзац пишется ПОД ЭТОТ сборник (жанр, год,
+    настоящие артисты), а ключи жанра идут отдельным блоком хэштегов. Без него остаётся
+    прежний статичный абзац из конфига — движок выключается одной строкой."""
     settings = config.youtube_playlists
     style = config.soundcloud.post
     artists = playlist_artists(tracks)
@@ -617,7 +663,7 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
     # по которому VK не даёт перехода.
     blocks = [
         f"{settings.header}\n{title}".strip() if settings.header.strip() else title,
-        settings.playlist_description.strip(),
+        (seo.description if seo is not None else settings.playlist_description).strip(),
         tracklist,
         style.service_block,
         " ".join(
@@ -626,6 +672,9 @@ def build_description(config: Config, title: str, tracklist: str, tracks: list[T
             )
         ),
         " ".join(build_search_tags(artists, style.search_phrases, style.channel_phrases)),
+        # Ключи жанра — отдельным блоком и последними: это длинный хвост («фонк для
+        # машины 2026»), он ценен поиску, но человеку в начале описания не нужен.
+        " ".join(build_search_tags(list(seo.keywords), ["{q}"])) if seo is not None else "",
     ]
     return "\n\n".join(block for block in blocks if block.strip())
 

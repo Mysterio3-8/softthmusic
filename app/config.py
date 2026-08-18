@@ -141,6 +141,11 @@ class YoutubePlaylistsConfig:
     tg_max_tracks: int = 0
     """Сколько треков уходит в Telegram-версию сборника (ТЗ 2026-08-16: «фулл плейлист
     можно в ВК, а в ТГ обрезанный»). 0 или больше числа треков → версия одна, полная."""
+    seo_engine: bool = True
+    """SEO-движок заголовков и описаний (`seo_engine.py`, ТЗ 2026-08-18).
+
+    Тумблер, а не жёсткая замена: движок меняет ВСЕ заголовки разом, и откат к прежним
+    `title_templates` должен быть строкой конфига, а не откатом релиза."""
     fallback_soundcloud: bool = False
     """Собирать СВОЮ подборку с SoundCloud, когда чужих плейлистов YouTube не осталось.
 
@@ -406,6 +411,7 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         min_tracks=int(raw.get("min_tracks", MIN_TRACKS_DEFAULT)),
         tg_max_tracks=int(raw.get("tg_max_tracks", 0)),
         fallback_soundcloud=bool(raw.get("fallback_soundcloud", False)),
+        seo_engine=bool(raw.get("seo_engine", True)),
     )
 
 
