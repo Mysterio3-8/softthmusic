@@ -134,6 +134,41 @@ def apply_texts(raw: dict, project_dir: Path | str = ".") -> dict:
     return applied
 
 
+def read_genres(project_dir: Path | str = ".") -> list[dict]:
+    """Жанры кнопки «🎼 Сборник по жанру» из контракта: [{"name": ..., "query": ...}]."""
+    path = Path(project_dir) / CONTRACT_FILENAME
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    genres = data.get("genres") if isinstance(data, dict) else None
+    if not isinstance(genres, list):
+        return []
+    result = []
+    for item in genres:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if name:
+            result.append({"name": name, "query": str(item.get("query", "")).strip() or name})
+    return result
+
+
+def apply_genres(raw: dict, project_dir: Path | str = ".") -> int:
+    """Жанры контракта → `soundcloud.genres`. Возвращает, сколько жанров применено.
+
+    Список перезаписывается ЦЕЛИКОМ: владелец удалил жанр в боте — он должен исчезнуть
+    и с кнопки, а merge оставил бы его жить."""
+    genres = read_genres(project_dir)
+    if not genres:
+        return 0
+    raw.setdefault("soundcloud", {})["genres"] = genres
+    get_logger().info("Жанры из контракта: %d", len(genres))
+    return len(genres)
+
+
 def apply_contract(raw: dict, project_dir: Path | str = ".") -> dict:
     """Наложить контракт на сырой конфиг ДО сборки Config. Возвращает применённое.
 

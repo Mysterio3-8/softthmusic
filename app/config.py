@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from app.manager_contract import apply_contract, apply_sources, apply_texts
+from app.manager_contract import apply_contract, apply_genres, apply_sources, apply_texts
 
 from app.vk_token_pool import DEFAULT_DAILY_CAP, MIN_GAP_MINUTES
 from app.yt_source import (
@@ -216,6 +216,7 @@ def load_config(config_path: str | Path = "config.yaml", env_path: str | Path = 
     apply_contract(raw, path.parent)
     apply_sources(raw, path.parent)
     apply_texts(raw, path.parent)
+    apply_genres(raw, path.parent)
     return _build_config(raw, group_token, user_token, _telegram_env(), _mtproto_env())
 
 
