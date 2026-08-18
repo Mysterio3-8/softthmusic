@@ -238,3 +238,14 @@ def test_artists_are_named_in_their_own_sentence():
     )
 
     assert "В сборнике: Macan, Miyagi." in pack.description
+
+
+def test_mood_and_situation_are_drawn_from_the_genre_base_not_pinned():
+    """Иначе все сборники жанра выходили бы «для машины», и половина конструкций
+    схлопнулась бы в одно название."""
+    params = SeoParams(genre="Рэп", count=15, year=2026)
+    titles = {build_title(params, rng=random.Random(seed)) for seed in range(300)}
+    situations = {s for s in ("для машины", "для тренировок", "для вечеринки", "для дороги")
+                  if any(s in title for title in titles)}
+
+    assert len(situations) >= 2, situations

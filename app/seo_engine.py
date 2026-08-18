@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 TITLE_ARTIST_LIMIT = 3
 """Сколько имён влезает в заголовок. Дальше — «и другие»: пять имён читаются как свалка
@@ -333,6 +333,15 @@ def _usable(template: str, params: SeoParams, profile: GenreProfile) -> bool:
     return True
 
 
+def _with_flavour(params: SeoParams, profile: GenreProfile, rng: random.Random) -> SeoParams:
+    """Досыпает настроение и ситуацию из словаря жанра, если их не задали снаружи."""
+    mood = params.mood or (rng.choice(list(profile.moods)) if profile.moods else "")
+    situation = params.situation or (
+        rng.choice(list(profile.situations)) if profile.situations else ""
+    )
+    return replace(params, mood=mood, situation=situation)
+
+
 def build_title(
     params: SeoParams,
     recent: tuple[str, ...] = (),
@@ -345,6 +354,10 @@ def build_title(
     повторным названием лучше, чем сборник без названия."""
     rng = rng or random.Random()
     profile = find_profile(params.genre)
+    # Настроение и ситуацию выбираем ЖРЕБИЕМ, а не берём первые из словаря: иначе все
+    # сборники жанра выходили бы «для машины», и половина конструкций схлопнулась бы в
+    # одно название — ровно то, ради чего движок и писался.
+    params = _with_flavour(params, profile, rng)
     templates = [
         template
         for group in TITLE_GROUPS
