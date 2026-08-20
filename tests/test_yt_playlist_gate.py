@@ -14,6 +14,7 @@ from app.yt_source import (
     proxy_candidates,
     PlaylistEntry,
     PlaylistUnsuitable,
+    YouTubeSourceError,
     download_playlist,
     select_entries,
 )
@@ -176,13 +177,51 @@ def test_download_switches_exit_when_the_first_one_returns_nothing(tmp_path, mon
     monkeypatch.setattr("app.yt_source.yt_dlp.YoutubeDL", FakeYDL)
     monkeypatch.setattr(
         "app.yt_source.collect_tracks",
-        lambda entries, target: ["трек"] if entries else [],
+        # Пять — это минимум по умолчанию: результат обязан быть ПОЛНЫМ сборником,
+        # а не просто непустым (см. тест про недобор ниже).
+        lambda entries, target: ["трек"] * 5 if entries else [],
     )
 
     tracks = download_playlist("https://youtube.com/playlist?list=x", tmp_path / "w")
 
-    assert tracks == ["трек"]
+    assert tracks == ["трек"] * 5
     assert used == ["socks5://127.0.0.1:10808", "socks5://127.0.0.1:10813"]
+
+
+def test_partial_download_is_not_published_as_a_compilation(tmp_path, monkeypatch):
+    """🔴 Живой случай 20.08 (запись 308): состав прошёл проверку — 15 годных записей из
+    40, — а CDN через прокси отдал РОВНО ОДИН файл. Приёмка была `if tracks:`, и на
+    стену ушёл «сборник» из одного трека под заголовком «Лучшие песни 2026».
+
+    Ошибка должна быть ПЕРЕХОДЯЩЕЙ: состав плейлиста хороший, не отдал файлы CDN.
+    PlaylistUnsuitable выбросила бы годный источник насовсем."""
+    monkeypatch.setenv("YT_PROXY", "socks5://127.0.0.1:10808")
+    monkeypatch.setenv("YT_PROXY_PORTS", "10808,10813")
+    monkeypatch.setattr(
+        "app.yt_source.list_playlist_entries",
+        lambda url, limit: _entries(200, 210, 220, 230, 240),
+    )
+
+    class FakeYDL:
+        def __init__(self, options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"entries": [{"id": "a"}]}
+
+    monkeypatch.setattr("app.yt_source.yt_dlp.YoutubeDL", FakeYDL)
+    monkeypatch.setattr("app.yt_source.collect_tracks", lambda entries, target: ["один"])
+
+    with pytest.raises(YouTubeSourceError) as error:
+        download_playlist("https://youtube.com/playlist?list=x", tmp_path / "w")
+
+    assert "1 треков при минимуме 5" in str(error.value)
 
 
 def test_owner_gets_the_description_of_the_file_he_actually_received():

@@ -359,6 +359,7 @@ def download_playlist(
         ],
     }
     last_error = ""
+    best: list[Track] = []
     for attempt, proxy in enumerate(proxy_candidates(), start=1):
         if proxy:
             options["proxy"] = proxy
@@ -372,17 +373,30 @@ def download_playlist(
             info = None
 
         tracks = collect_tracks((info or {}).get("entries") or [], target_dir)
-        if tracks:
+        # 🔴 Минимум проверяется и ЗДЕСЬ, после скачивания, а не только по плоскому
+        # списку. 20.08 в сообщество ушёл «сборник» из ОДНОГО трека: состав прошёл
+        # проверку (15 годных записей из 40), а CDN через прокси отдал ровно один файл —
+        # и `if tracks:` принимал любой непустой результат. Подборка из одного трека
+        # с заголовком «Лучшие песни 2026» читается как поломка софта.
+        if len(tracks) >= min_tracks:
             get_logger().info(
                 "Скачано треков: %d из %s (выход %s)", len(tracks), url, proxy or "прямой"
             )
             return tracks
+        if len(tracks) > len(best):
+            best = tracks
         get_logger().warning(
-            "Выход %s не отдал ни одного трека (попытка %d) — меняю выход",
-            proxy or "прямой", attempt,
+            "Выход %s отдал %d треков при минимуме %d (попытка %d) — меняю выход",
+            proxy or "прямой", len(tracks), min_tracks, attempt,
         )
 
-    raise YouTubeSourceError(f"Ни один трек не скачался ни через один выход. {last_error}"[:400])
+    # Недобор — это НЕ приговор плейлисту: состав у него годный, не отдал файлы CDN.
+    # Поэтому YouTubeSourceError (плейлист остаётся в очереди и получит новые попытки),
+    # а не PlaylistUnsuitable, которая выбросила бы годный источник насовсем.
+    raise YouTubeSourceError(
+        f"Скачалось {len(best)} треков при минимуме {min_tracks} "
+        f"ни через один выход. {last_error}"[:400]
+    )
 
 
 def proxy_candidates() -> list[str | None]:
