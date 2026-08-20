@@ -8,7 +8,9 @@ from app.config import DiscoveryConfig
 from app.sc_discovery import TrackRef, build_source_url, collect_new_tracks, rank_tracks
 
 
-def _ref(title="T", artist="A", plays=1_000_000, url=None, russian=False) -> TrackRef:
+def _ref(title="Ночь", artist="Артист", plays=1_000_000, url=None, russian=False) -> TrackRef:
+    """Имена намеренно похожи на настоящие: гейт имён (`usable_track`) отбраковывает
+    односимвольные заглушки вроде «A»/«T», и на них тест проверял бы не то."""
     return TrackRef(
         url=url or f"https://api.soundcloud.com/tracks/{title}",
         title=title,
@@ -125,7 +127,7 @@ def test_collect_stops_at_wanted(monkeypatch):
     monkeypatch.setattr(
         sc_discovery,
         "discover_tracks",
-        lambda *a, **k: [_ref(title=f"T{i}", url=f"u{i}") for i in range(10)],
+        lambda *a, **k: [_ref(title=f"Ночь {i}", url=f"u{i}") for i in range(10)],
     )
 
     assert len(collect_new_tracks(["q"], set(), set(), wanted=3)) == 3
@@ -200,3 +202,34 @@ def test_refill_passes_queue_history_to_dedup(queue, monkeypatch):
 
     assert seen["urls"] == {"u1"}
     assert seen["names"] == {"Артист Хит"}
+
+
+def test_collect_drops_genre_labels_and_nameless_finds(monkeypatch):
+    """Гейт имён работает и на ОДИНОЧНЫХ треках, а не только в треклисте сборника
+    (открытый пункт из передачи 2026-08-20). Заголовок записи показывает имя артиста
+    ровно так же, и «Русский Фонк — ВАЙБ 2025» на стене читается как поломка."""
+    from app import sc_discovery
+
+    found = [
+        _ref(title="ВАЙБ 2025", artist="Русский Фонк", url="label", russian=True),
+        _ref(title="Батальон", artist="****", url="nameless", russian=True),
+        _ref(title="Тебя Нежно Грубо", artist="TARAS", url="ok", russian=True),
+    ]
+    monkeypatch.setattr(sc_discovery, "discover_tracks", lambda *a, **k: found)
+
+    result = collect_new_tracks(["запрос"], set(), set(), wanted=5)
+
+    assert [ref.url for ref in result] == ["ok"]
+
+
+def test_collect_keeps_a_track_whose_artist_came_from_the_uploader(monkeypatch):
+    """Гейт намеренно МЯГКИЙ: требовать разделитель «артист — песня» у одиночных
+    треков значило бы выкосить половину выдачи и вернуть пустую очередь (простой
+    09.08). Отсеиваем негодные имена, а не способ, которым имя получено."""
+    from app import sc_discovery
+
+    ref = _ref(title="Бэнд", artist="kizaru", url="u1", russian=True)
+    object.__setattr__(ref, "artist_from_title", False)
+    monkeypatch.setattr(sc_discovery, "discover_tracks", lambda *a, **k: [ref])
+
+    assert [r.url for r in collect_new_tracks(["q"], set(), set(), wanted=5)] == ["u1"]

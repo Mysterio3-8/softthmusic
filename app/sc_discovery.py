@@ -31,7 +31,7 @@ import yt_dlp
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.logger import get_logger
-from app.track_naming import has_artist_separator, split_artist_title
+from app.track_naming import has_artist_separator, split_artist_title, usable_track
 
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
@@ -168,7 +168,16 @@ def collect_new_tracks(
 
     Дедуп идёт по ссылке И по паре «исполнитель — название» (`known_names`): один и тот
     же хит лежит на SoundCloud десятками перезаливов с разными id, и без второго ключа
-    в очередь набивалось бы пять копий одного трека."""
+    в очередь набивалось бы пять копий одного трека.
+
+    🔴 Непригодные имена отсеиваются ЗДЕСЬ, а не только у сборников (ТЗ 2026-08-20,
+    открытый пункт «гейт имён стоит только на сборниках»). Одиночный трек показывает
+    имя артиста в заголовке записи так же, как сборник — в треклисте, и «Русский Фонк —
+    ВАЙБ 2025» на стене читается как поломка независимо от того, каким потоком он туда
+    приехал. Гейт мягкий: требования «в названии обязан быть разделитель» здесь НЕТ —
+    оно выкосило бы половину выдачи и вернуло бы пустую очередь (простой 09.08).
+    Отбраковываем только заведомо негодное: имя без букв и жанровый ярлык вместо
+    имени."""
     log = get_logger()
     found: list[TrackRef] = []
     seen = set(known_urls)
@@ -187,6 +196,12 @@ def collect_new_tracks(
                 break
             name_key = _name_key(f"{ref.artist} {ref.title}")
             if ref.url in seen or (name_key and name_key in seen_names):
+                continue
+            if not usable_track(ref.artist, ref.title):
+                log.info(
+                    "Находка «%s — %s» не похожа на песню — пропускаю", ref.artist, ref.title
+                )
+                seen.add(ref.url)
                 continue
             seen.add(ref.url)
             seen_names.add(name_key)
