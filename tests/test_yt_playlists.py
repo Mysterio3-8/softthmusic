@@ -1,5 +1,5 @@
 """Поток сборников с YouTube: расписание, лимит, тексты записи и описания."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -315,3 +315,39 @@ def test_description_keeps_search_keys_out_of_the_post(tmp_path):
 
     assert "#" in description
     assert "#" not in text
+
+
+def test_original_playlist_name_becomes_the_title():
+    """ТЗ владельца 2026-08-21: «брать оригинальные названия: плейлист — название 2026».
+
+    Разворачивает прежнее решение (имя донора не использовать, чтобы не тащить чужой
+    брендинг) — владелец попросил обратное прямо."""
+    now = datetime(2026, 9, 8, tzinfo=timezone.utc)
+
+    title = build_title(
+        ["{artists} — микс {year}"],
+        [],
+        now,
+        ["Miyagi"],
+        original="Лучшее за год",
+        original_template="Плейлист — {original} {year}",
+    )
+
+    assert title == "Плейлист — Лучшее за год 2026"
+
+
+def test_templates_still_work_when_the_donor_name_is_unknown():
+    """Имя донора не разобрали — работают прежние шаблоны, сборник без названия
+    не остаётся."""
+    now = datetime(2026, 9, 8, tzinfo=timezone.utc)
+
+    title = build_title(
+        ["{artists} — микс {year}"],
+        [],
+        now,
+        ["Miyagi"],
+        original="",
+        original_template="Плейлист — {original} {year}",
+    )
+
+    assert title == "Miyagi — микс 2026"

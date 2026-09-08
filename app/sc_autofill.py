@@ -44,6 +44,8 @@ def refill(config: Config, queue: AlbumQueue) -> int:
         wanted=wanted,
         limit_per_source=settings.limit_per_source,
         min_plays=settings.min_plays,
+        western_only=settings.western_only,
+        blocked_words=settings.blocked_words,
     )
     if not found:
         log.warning("Автопоиск треков: подходящих новинок не нашлось (порог %d прослушиваний)",

@@ -45,8 +45,20 @@ def build_release_header(style, artist: str, name: str, kind: str) -> str:
     return " ".join(part for part in (style.flag, line) if part)
 
 
+def build_credit(style, artist: str) -> str:
+    """Строка авторских прав под постом (ТЗ владельца 2026-09-02).
+
+    «Обязательно отмечать всех авторов, чтобы никто не думал, что я треки перезалил,
+    чтобы с них зарабатывать». Без имени исполнителя строка теряет смысл (получилось бы
+    голое «все права принадлежат правообладателям»), поэтому её тогда не ставим."""
+    template = getattr(style, "credit_line", "")
+    if not template.strip() or not artist.strip():
+        return ""
+    return template.format(artist=artist.strip())
+
+
 def build_release_text(style, artist: str, name: str, kind: str, body: str = "") -> str:
-    """Пост-релиз: шапка, необязательный треклист, ссылки, теги.
+    """Пост-релиз: шапка, необязательный треклист, строка авторства, ссылки, теги.
 
     style — PostStyle из config. Пустой url просто не даёт своей строки, поэтому
     ссылку на канал можно убрать, не трогая код.
@@ -64,7 +76,14 @@ def build_release_text(style, artist: str, name: str, kind: str, body: str = "")
     blocks = [build_release_header(style, artist, name, kind)]
     if body.strip():
         blocks.append(body.strip())
-    blocks.append("\n".join(links + ([" ".join(tags)] if tags else [])))
+    credit = build_credit(style, artist)
+    if credit:
+        blocks.append(credit)
+    # Теги отбиты от ссылок пустой строкой: слипшуюся строку тегов владелец просил
+    # опустить ниже (ТЗ 2026-08-21, та же правка, что и в новостном софте).
+    blocks.append("\n".join(links))
+    if tags:
+        blocks.append(" ".join(tags))
     return "\n\n".join(block for block in blocks if block)
 
 
@@ -101,9 +120,10 @@ def build_release_video_description(
         )
         if url
     )
+    credit = build_credit(style, artist)
     return seo.build_video_description(
         header=build_release_header(style, artist, name, kind),
-        body="\n\n".join(part for part in (body.strip(), links) if part),
+        body="\n\n".join(part for part in (body.strip(), credit, links) if part),
         subjects=_release_subjects(artist, name),
         phrases=style.search_phrases,
         base_tags=style.base_tags,
