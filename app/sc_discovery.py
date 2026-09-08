@@ -35,6 +35,18 @@ from app.track_naming import has_artist_separator, split_artist_title, usable_tr
 
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
+# Буквы, которых нет в русском алфавите. Украинский трек с латинским названием
+# кириллицей не ловится, а этими буквами — ловится.
+_UKRAINIAN = re.compile(r"[іїєґІЇЄҐ]")
+
+DEFAULT_BLOCKED_WORDS = ("СВО", "ВСУ", "ЗСУ")
+"""ТЗ владельца 2026-09-02: «если будут попадаться украинские треки, будет название
+СВО, ВСУ и ЗСУ — такие брать точно не надо».
+
+Значение по умолчанию, а не только в config.example.yaml, намеренно: рабочий
+`config.yaml` лежит на сервере и правится руками, а запрет владельца должен
+действовать сразу после деплоя, без правки конфига."""
+
 DEFAULT_MIN_PLAYS = 100_000
 """Порог популярности. Ниже этого трек считается случайной находкой выдачи.
 
@@ -92,9 +104,42 @@ def _search_query(url: str) -> str:
     values = parse_qs(parsed.query).get("q") or []
     return unquote(values[0]).strip() if values else ""
 
+def is_blocked_text(text: str, blocked_words: tuple[str, ...] | list[str]) -> bool:
+    """Запрещён ли трек по названию и исполнителю: украинский или про войну.
+
+    Отдельно от `is_blocked` потому, что тем же правилом обязаны проверяться и треки
+    СБОРНИКОВ с YouTube: там нет TrackRef, а запрет владельца от источника не зависит.
+
+    Слово ищем как ОТДЕЛЬНОЕ (границы слова), иначе «ВСУ» срабатывало бы внутри
+    безобидных слов и выкидывало нормальные треки."""
+    if _UKRAINIAN.search(text):
+        return True
+    lowered = text.lower()
+    return any(
+        re.search(rf"\b{re.escape(word.lower())}\b", lowered)
+        for word in blocked_words
+        if word.strip()
+    )
+
+
+def is_western_text(text: str) -> bool:
+    """Западный ли трек. Признак — отсутствие кириллицы в названии и исполнителе."""
+    return not _CYRILLIC.search(text)
+
+
+def is_blocked(ref: "TrackRef", blocked_words: tuple[str, ...] | list[str]) -> bool:
+    """Трек под запретом владельца: украинский или про войну."""
+    haystack = f"{ref.title} {ref.artist}"
+    return is_blocked_text(haystack, blocked_words)
+
 
 def discover_tracks(
-    source: str, limit: int = 40, min_plays: int = DEFAULT_MIN_PLAYS
+    source: str,
+    limit: int = 40,
+    min_plays: int = DEFAULT_MIN_PLAYS,
+    *,
+    western_only: bool = False,
+    blocked_words: tuple[str, ...] | list[str] = DEFAULT_BLOCKED_WORDS,
 ) -> list[TrackRef]:
     """Популярные треки по одному источнику, от самых востребованных к остальным."""
     url = build_source_url(source, limit)
@@ -116,15 +161,25 @@ def discover_tracks(
         raise DiscoveryError(f"Источник {source} пуст")
 
     refs = [ref for ref in map(_to_ref, info.get("entries") or []) if ref is not None]
-    return rank_tracks([ref for ref in refs if ref.plays >= min_plays])
+    suitable = [
+        ref for ref in refs
+        if ref.plays >= min_plays and not is_blocked(ref, blocked_words)
+    ]
+    return rank_tracks(suitable, western_only=western_only)
 
 
-def rank_tracks(refs: list[TrackRef]) -> list[TrackRef]:
-    """Русские вперёд, внутри — по числу прослушиваний.
+def rank_tracks(refs: list[TrackRef], *, western_only: bool = False) -> list[TrackRef]:
+    """Самые слушаемые вперёд.
 
-    «Желательно русские» из ТЗ — это предпочтение, а не фильтр: запрос на русском всё
-    равно приносит зарубежные треки, и выбрасывать хит на 10 млн прослушиваний только
-    из-за латиницы в названии было бы хуже, чем поставить его вторым."""
+    western_only (ТЗ владельца 2026-09-05: «приоритет западные треки, только западные»)
+    — это ФИЛЬТР, а не сортировка: русскоязычные находки выбрасываются совсем. Владелец
+    подтвердил формулировку прямым вопросом, зная цену: если западных находок мало,
+    очередь пустеет и трек дня может не выйти.
+
+    Прежнее поведение («желательно русские» из ТЗ 2026-08-10 — русские первыми, но
+    зарубежные не выбрасываются) остаётся при western_only=False."""
+    if western_only:
+        return sorted((ref for ref in refs if not ref.russian), key=lambda ref: -ref.plays)
     return sorted(refs, key=lambda ref: (not ref.russian, -ref.plays))
 
 
@@ -160,6 +215,8 @@ def collect_new_tracks(
     wanted: int,
     limit_per_source: int = 40,
     min_plays: int = DEFAULT_MIN_PLAYS,
+    western_only: bool = False,
+    blocked_words: tuple[str, ...] | list[str] = DEFAULT_BLOCKED_WORDS,
 ) -> list[TrackRef]:
     """Обходит источники по кругу и набирает `wanted` ещё не встречавшихся треков.
 
@@ -186,7 +243,10 @@ def collect_new_tracks(
         if len(found) >= wanted:
             break
         try:
-            refs = discover_tracks(source, limit_per_source, min_plays)
+            refs = discover_tracks(
+                source, limit_per_source, min_plays,
+                western_only=western_only, blocked_words=blocked_words,
+            )
         except DiscoveryError as exc:
             log.warning("Поиск треков: %s", exc)
             continue

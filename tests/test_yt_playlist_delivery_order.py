@@ -44,6 +44,10 @@ class _Settings:
         self.ready_dir = tmp_path / "ready"
         self.remote_host = "vps"
         self.deliver_chat = ""
+        # Эти тесты проверяют САМУ механику отдачи файла, поэтому включаем её явно.
+        # В проде она выключена (ТЗ владельца 2026-09-05: «в тг ничего не надо мне
+        # присылать») — отдельный тест ниже про это.
+        self.deliver_enabled = True
 
 
 class _Config:
@@ -115,3 +119,23 @@ def test_owner_gets_the_description_and_nothing_else(tmp_path, queue):
     _deliver(_Config(tmp_path), queue, queue.next_pending(), _compilation(tmp_path), notifier)
 
     assert notifier.messages[0] == "описание"
+
+
+def test_delivery_is_skipped_when_disabled(tmp_path, queue):
+    """ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать».
+
+    Владельцу ничего не уходит и отметка «отдан» не ставится, НО файл обязан уцелеть:
+    рабочий каталог сборника удаляется в `finally` вызывающего, и оставленный там файл
+    исчез бы вместе с ним, сломав ручную заливку на YouTube."""
+    config = _Config(tmp_path)
+    config.youtube_playlists.deliver_enabled = False
+    queue.add("https://youtube.com/playlist?list=1", "Сборник", "автор", "источник")
+    row = queue.next_pending()
+    compilation = _compilation(tmp_path)
+
+    path = _deliver(config, queue, row, compilation, FakeNotifier())
+
+    assert path.exists(), "файл должен уцелеть"
+    assert path.parent.name == "ready"
+    assert not compilation.video_path.exists(), "из рабочего каталога он перенесён"
+    assert queue.next_pending().delivered is False

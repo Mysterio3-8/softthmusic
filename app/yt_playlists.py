@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import random
 import shutil
 from dataclasses import dataclass
@@ -25,9 +26,10 @@ from pathlib import Path
 from app.album_db import AlbumQueue
 from app.album_scheduler import is_quiet_hour, now_msk, to_msk, window_start as _window_start
 from app.config import Config
-from app.delivery import cleanup_ready, deliver
+from app.delivery import cleanup_ready, deliver, store_in_ready
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
+from app.sc_discovery import is_blocked_text, is_western_text
 from app.notifier import Notifier
 from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
@@ -384,6 +386,13 @@ def build_compilation(
             min_tracks=settings.min_tracks,
             skip_keys=playlists.recent_track_keys(),
         )
+        # Запрет владельца действует и на ЧУЖОМ плейлисте: «top hits playlist» — это
+        # только запрос, что внутри — заранее неизвестно, и русский или украинский трек
+        # доехал бы до стены внутри сборника мимо всех фильтров.
+        # Своей подборке с SoundCloud фильтр не нужен: её треки уже прошли те же
+        # правила при поиске (rank_tracks/is_blocked), и повторный проход только
+        # выбрасывал бы заказанный владельцем жанр.
+        tracks = filter_tracks(tracks, config)
     _ensure_own_covers(tracks)
 
     artists = playlist_artists(tracks)
@@ -459,6 +468,42 @@ def _short_title(config: Config, seo, short_tracks, genre: str, now) -> str:
     )
     return pack.title if pack is not None else seo.title
 
+MIN_TRACKS_AFTER_FILTER = 3
+"""Меньше этого сборник не собираем: три трека — уже не подборка, а огрызок."""
+
+
+def filter_tracks(tracks: list[Track], config: Config) -> list[Track]:
+    """Выбросить из сборника треки, которые владелец брать запретил.
+
+    Запросы к YouTube — это ТОЛЬКО запросы, а не проверка: по «top hits playlist»
+    приезжает чужой пользовательский плейлист, и что внутри — заранее неизвестно.
+    Поэтому те же правила, что у поиска треков (`sc_discovery`), применяются и здесь,
+    уже после скачивания: иначе русский или украинский трек спокойно доехал бы до
+    стены внутри сборника, мимо всех фильтров.
+
+    Правила берём из настроек автопоиска — они общие для софта, а не свойство
+    конкретного потока; дублировать их вторым набором ключей значило бы однажды
+    поменять один и забыть про другой."""
+    rules = config.soundcloud.discovery
+    kept: list[Track] = []
+    for track in tracks:
+        text = f"{track.title} {track.artist}"
+        if is_blocked_text(text, rules.blocked_words):
+            get_logger().info("Сборник: выбрасываю «%s» — запрещённый трек", text.strip())
+            continue
+        if rules.western_only and not is_western_text(text):
+            get_logger().info("Сборник: выбрасываю «%s» — не западный", text.strip())
+            continue
+        kept.append(track)
+
+    if len(kept) < MIN_TRACKS_AFTER_FILTER:
+        raise YouTubeSourceError(
+            f"после фильтра осталось треков: {len(kept)} — сборник не собираем"
+        )
+    # Позиции перенумеровываем: по ним строится порядок склейки и тайм-коды описания,
+    # а после выброса в середине они становятся дырявыми.
+    return [dataclasses.replace(track, position=index) for index, track in enumerate(kept, 1)]
+
 
 def build_title(
     templates: list[str],
@@ -467,9 +512,16 @@ def build_title(
     artists: list[str] | None = None,
     count: int = 0,
     genre: str = "",
+    *,
+    original: str = "",
+    original_template: str = "",
 ) -> str:
-    """Название собирается с нуля — название донора не берётся даже частично, чтобы
-    в сообщество не утёк чужой брендинг.
+    """Название сборника.
+
+    ⚠️ ТЗ владельца 2026-08-21 РАЗВЕРНУЛО прежнее решение: «брать оригинальные названия:
+    плейлист — название 2026». Раньше имя донора не использовалось намеренно, чтобы в
+    сообщество не утёк чужой брендинг; владелец попросил обратное прямо, риск его.
+    Имя донора известно — берём его; неизвестно — работают прежние шаблоны.
 
     Жалоба владельца 2026-08-11: «у плейлистов одинаковые название одни и те же»,
     «надо более кликабельные, больше байта, без цензуры можно добавить». Отсюда две
@@ -484,6 +536,8 @@ def build_title(
 
     Уже использованные недавно варианты не берём; все заняты — берём любой, потому что
     сборник без названия хуже, чем сборник с повторным."""
+    if original.strip() and original_template.strip():
+        return original_template.format(original=original.strip(), year=now.year).strip()
     template = choose_title_template(templates, recent, now, artists, count, genre)
     return render_title(template, now, artists, count, genre)
 
@@ -769,6 +823,15 @@ def _deliver(
     Сбой отдачи не роняет тик: сборник важнее, публикация пойдёт с исходного пути.
     Повторная попытка того же плейлиста файл не дублирует — см. `delivered`."""
     settings = config.youtube_playlists
+    if not settings.deliver_enabled:
+        # ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать». Меняется только
+        # отправка; сам файл по-прежнему сохраняем в ready/ — рабочий каталог сборника
+        # удаляется в `finally` вызывающего, и оставленный там файл исчез бы вместе с
+        # ним, сломав ручную заливку на YouTube.
+        get_logger().info("Отдача сборников в Telegram выключена — сохраняю в ready/")
+        return store_in_ready(
+            compilation.video_path, settings.ready_dir, _safe_file_name(compilation.title)
+        )
     if playlist.delivered:
         get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
         return compilation.file_for_owner

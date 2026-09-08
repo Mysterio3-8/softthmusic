@@ -52,9 +52,12 @@ def test_single_post_matches_the_requested_layout():
 
     text = build_release_text(_style(), "Imminence", "False Light", "Single")
 
+    # Строка авторства и отбивка тегов пустой строкой — ТЗ владельца 2026-09-02
+    # («обязательно отмечать всех авторов») и 2026-08-21 («хэштеги липнут»).
     assert text == (
         "🇸🇪 Imminence — False Light (Single) | Без цензуры\n\n"
-        "♾️ Слушать в Telegram бесплатно и без цензуры: https://t.me/muz_damn_bot\n"
+        "© Imminence. Все права на музыку принадлежат правообладателям.\n\n"
+        "♾️ Слушать в Telegram бесплатно и без цензуры: https://t.me/muz_damn_bot\n\n"
         "#imminence@posthardcore"
     )
 
@@ -122,7 +125,11 @@ def test_empty_links_do_not_leave_blank_lines():
 
     text = build_release_text(_style(listen_url="", channel_url=""), "Imminence", "X", "Single")
 
-    assert text == "🇸🇪 Imminence — X (Single) | Без цензуры\n\n#imminence@posthardcore"
+    assert text == (
+        "🇸🇪 Imminence — X (Single) | Без цензуры\n\n"
+        "© Imminence. Все права на музыку принадлежат правообладателям.\n\n"
+        "#imminence@posthardcore"
+    )
 
 
 def test_track_without_artist_keeps_the_name_alone():

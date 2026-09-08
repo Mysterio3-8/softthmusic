@@ -8,6 +8,7 @@ import yaml
 from dotenv import load_dotenv
 
 from app.manager_contract import apply_contract, apply_genres, apply_sources, apply_texts
+from app.sc_discovery import DEFAULT_BLOCKED_WORDS
 
 from app.vk_token_pool import DEFAULT_DAILY_CAP, MIN_GAP_MINUTES
 from app.yt_source import (
@@ -39,6 +40,14 @@ class PostStyle:
     hashtag_group: str
     track_kind: str
     album_kind: str
+    credit_line: str = "© {artist}. Все права на музыку принадлежат правообладателям."
+    """Строка авторских прав под текстом поста (ТЗ владельца 2026-09-02: «обязательно
+    отмечать всех авторов, чтобы никто не думал, что я треки перезалил, чтобы с них
+    зарабатывать» и 2026-09-03: «всегда указывать авторское право»).
+
+    {artist} подставляется из релиза. Пустая строка — авторства нет; так делать не
+    надо, значение по умолчанию непустое намеренно: на сервере лежит свой config.yaml,
+    и без дефолта строка не появилась бы до ручной правки."""
     # SEO (ТЗ 2026-08-10). Пустые значения = прежнее поведение: один тег и никаких
     # поисковых фраз, то есть новые поля ничего не ломают у существующего конфига.
     base_tags: list[str] = field(default_factory=list)
@@ -47,7 +56,7 @@ class PostStyle:
     """Постоянные запросы сообщества («музыка без цензуры», «инфинити музыка»).
     В отличие от search_phrases не зависят от артиста и идут в КАЖДОЙ публикации —
     ТЗ владельца 2026-08-11: по ним ищут чаще, чем по имени исполнителя."""
-    post_tag_limit: int = 6
+    post_tag_limit: int = 3
     video_tag_limit: int = 16
     service_block: str = ""
     """Блок «что это за сервис» в конце описания видео: ссылка на бота и на канал.
@@ -71,6 +80,13 @@ class DiscoveryConfig:
     """До скольки треков доливаем за один добор."""
     limit_per_source: int = 40
     min_plays: int = 100_000
+    western_only: bool = True
+    """ТЗ владельца 2026-09-05: «приоритет западные треки, только западные».
+    Русскоязычные находки выбрасываются. По умолчанию ВКЛЮЧЕНО: рабочий config.yaml
+    лежит на сервере, и запрет владельца должен действовать сразу после деплоя."""
+    blocked_words: list[str] = field(default_factory=lambda: list(DEFAULT_BLOCKED_WORDS))
+    """Слова, по которым трек не берём вовсе (ТЗ 2026-09-02: СВО, ВСУ, ЗСУ).
+    Украинские треки отсекаются отдельно — по буквам, которых нет в русском."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +144,16 @@ class YoutubePlaylistsConfig:
     header: str
     playlist_description: str
     title_templates: list[str]
+    original_title_template: str = "Плейлист — {original} {year}"
+    """Название сборника по ОРИГИНАЛЬНОМУ имени плейлиста-донора (ТЗ владельца
+    2026-08-21: «брать оригинальные названия: плейлист — название 2026»).
+
+    ⚠️ Раньше имя донора не использовалось намеренно — чтобы в сообщество не утёк чужой
+    брендинг. Владелец попросил обратное явно; title_templates остаются запасом на
+    случай, когда имя донора неизвестно. Пустая строка возвращает прежнее поведение."""
+    deliver_enabled: bool = False
+    """Слать ли готовый сборник владельцу в Telegram. ТЗ 2026-09-05: «в тг ничего не
+    надо мне присылать» — поэтому по умолчанию ВЫКЛЮЧЕНО (было включено всегда)."""
     post_promo: str = ""
     """Промо-блок записи на стене. Пусто → заводской текст из yt_playlists.
 
@@ -329,7 +355,7 @@ def _build_soundcloud(raw: dict) -> SoundCloudConfig:
         max_interval_minutes=max_interval,
         quiet_start_hour=quiet_start,
         quiet_end_hour=quiet_end,
-        max_posts_per_day=int(raw.get("max_posts_per_day", 5)),
+        max_posts_per_day=int(raw.get("max_posts_per_day", 1)),
         max_track_attempts=int(raw.get("max_track_attempts", 3)),
         work_dir=Path(raw.get("work_dir", "downloads/soundcloud")),
         post=_build_post_style(raw.get("post") or {}),
@@ -352,6 +378,12 @@ def _build_discovery(raw: dict) -> DiscoveryConfig:
         target_queue=target_queue,
         limit_per_source=int(raw.get("limit_per_source", 40)),
         min_plays=int(raw.get("min_plays", 100_000)),
+        western_only=bool(raw.get("western_only", True)),
+        blocked_words=[
+            str(item).strip()
+            for item in (raw.get("blocked_words") or DEFAULT_BLOCKED_WORDS)
+            if str(item).strip()
+        ],
     )
 
 
@@ -391,7 +423,7 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         sources=[str(item).strip() for item in (raw.get("sources") or []) if str(item).strip()],
         discover_limit=int(raw.get("discover_limit", 20)),
         max_tracks=int(raw.get("max_tracks", 15)),
-        max_posts_per_day=int(raw.get("max_posts_per_day", 2)),
+        max_posts_per_day=int(raw.get("max_posts_per_day", 1)),
         min_interval_minutes=min_interval,
         max_interval_minutes=max_interval,
         quiet_start_hour=quiet_start,
@@ -412,14 +444,21 @@ def _build_youtube_playlists(raw: dict) -> YoutubePlaylistsConfig:
         tg_max_tracks=int(raw.get("tg_max_tracks", 0)),
         fallback_soundcloud=bool(raw.get("fallback_soundcloud", False)),
         seo_engine=bool(raw.get("seo_engine", True)),
+        original_title_template=str(
+            raw.get("original_title_template", "Плейлист — {original} {year}")
+        ),
+        deliver_enabled=bool(raw.get("deliver_enabled", False)),
     )
 
 
 def _build_post_style(raw: dict) -> PostStyle:
     return PostStyle(
         flag=str(raw.get("flag", "🎧")),
-        title_suffix=str(raw.get("title_suffix", "Без цензуры")),
-        listen_label=str(raw.get("listen_label", "♾️ Слушать в Telegram бесплатно и без цензуры:")),
+        # ТЗ владельца 2026-09-05: «нативно указывать, как что треки без цензуры, прямо
+        # не надо говорить… как нативно или вообще не указывать». Прежние значения
+        # («Без цензуры» в заголовке и в призыве) говорили это прямым текстом.
+        title_suffix=str(raw.get("title_suffix", "")),
+        listen_label=str(raw.get("listen_label", "♾️ Слушать в Telegram:")),
         listen_url=str(raw.get("listen_url", "")),
         channel_label=str(raw.get("channel_label", "📢 Канал:")),
         channel_url=str(raw.get("channel_url", "")),
@@ -427,10 +466,14 @@ def _build_post_style(raw: dict) -> PostStyle:
         hashtag_group=str(raw.get("hashtag_group", "")),
         track_kind=str(raw.get("track_kind", "Single")),
         album_kind=str(raw.get("album_kind", "Album")),
+        credit_line=str(
+            raw.get("credit_line", "© {artist}. Все права на музыку принадлежат правообладателям.")
+        ),
         base_tags=[str(tag) for tag in (raw.get("base_tags") or [])],
         search_phrases=[str(phrase) for phrase in (raw.get("search_phrases") or [])],
         channel_phrases=[str(phrase) for phrase in (raw.get("channel_phrases") or [])],
-        post_tag_limit=int(raw.get("post_tag_limit", 6)),
+        # ТЗ владельца 2026-09-05: «меньше хэштегов, 1–3».
+        post_tag_limit=int(raw.get("post_tag_limit", 3)),
         video_tag_limit=int(raw.get("video_tag_limit", 16)),
         service_block=str(raw.get("service_block", "")).strip(),
     )

@@ -233,3 +233,53 @@ def test_collect_keeps_a_track_whose_artist_came_from_the_uploader(monkeypatch):
     monkeypatch.setattr(sc_discovery, "discover_tracks", lambda *a, **k: [ref])
 
     assert [r.url for r in collect_new_tracks(["q"], set(), set(), wanted=5)] == ["u1"]
+
+def test_western_only_drops_russian_tracks():
+    """ТЗ владельца 2026-09-05: «приоритет западные треки, только западные».
+
+    Это фильтр, а не сортировка: русскоязычная находка не должна оказаться даже
+    последней в списке."""
+    refs = [_ref(title="Дистанция", russian=True, plays=9_000_000), _ref(title="Distance")]
+
+    ranked = rank_tracks(refs, western_only=True)
+
+    assert [ref.title for ref in ranked] == ["Distance"]
+
+
+def test_without_the_flag_ranking_stays_as_before():
+    """Прежнее поведение (ТЗ 2026-08-10 «желательно русские») никуда не делось."""
+    refs = [_ref(title="Distance", plays=10), _ref(title="Дистанция", russian=True, plays=1)]
+
+    ranked = rank_tracks(refs, western_only=False)
+
+    assert [ref.title for ref in ranked] == ["Дистанция", "Distance"]
+
+
+def test_military_words_are_blocked():
+    """ТЗ владельца 2026-09-02: СВО, ВСУ и ЗСУ брать точно не надо."""
+    from app.sc_discovery import DEFAULT_BLOCKED_WORDS, is_blocked
+
+    assert is_blocked(_ref(title="Песня про ВСУ"), DEFAULT_BLOCKED_WORDS) is True
+    assert is_blocked(_ref(title="Marching On", artist="СВО"), DEFAULT_BLOCKED_WORDS) is True
+
+
+def test_ukrainian_letters_are_blocked():
+    """Украинский трек с латинским исполнителем кириллицей не ловится — ловится
+    буквами, которых нет в русском алфавите."""
+    from app.sc_discovery import DEFAULT_BLOCKED_WORDS, is_blocked
+
+    assert is_blocked(_ref(title="Нехай їде"), DEFAULT_BLOCKED_WORDS) is True
+
+
+def test_blocked_word_inside_another_word_is_not_a_match():
+    """«ВСУ» ищется как отдельное слово: иначе фильтр выкидывал бы нормальные треки."""
+    from app.sc_discovery import DEFAULT_BLOCKED_WORDS, is_blocked
+
+    assert is_blocked(_ref(title="Всуе"), DEFAULT_BLOCKED_WORDS) is False
+
+
+def test_western_only_is_on_by_default_in_config():
+    """Рабочий config.yaml лежит на сервере — запрет владельца должен действовать
+    сразу после деплоя, без ручной правки конфига."""
+    assert DiscoveryConfig().western_only is True
+    assert "ВСУ" in DiscoveryConfig().blocked_words
