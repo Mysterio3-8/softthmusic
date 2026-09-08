@@ -188,7 +188,12 @@ def build_compilation(
     _ensure_own_covers(tracks)
 
     title = build_title(
-        settings.title_templates, playlists.recent_titles(20), now, playlist_artists(tracks, 3)
+        settings.title_templates,
+        playlists.recent_titles(20),
+        now,
+        playlist_artists(tracks, 3),
+        original=playlist.title,
+        original_template=settings.original_title_template,
     )
     video_path = _render(tracks, work_dir)
     tracklist = build_tracklist(
@@ -205,10 +210,20 @@ def build_compilation(
 
 
 def build_title(
-    templates: list[str], recent: list[str], now: datetime, artists: list[str] | None = None
+    templates: list[str],
+    recent: list[str],
+    now: datetime,
+    artists: list[str] | None = None,
+    *,
+    original: str = "",
+    original_template: str = "",
 ) -> str:
-    """Название собирается с нуля — название донора не берётся даже частично, чтобы
-    в сообщество не утёк чужой брендинг.
+    """Название сборника.
+
+    ⚠️ ТЗ владельца 2026-08-21 РАЗВЕРНУЛО прежнее решение: «брать оригинальные названия:
+    плейлист — название 2026». Раньше имя донора не использовалось намеренно, чтобы в
+    сообщество не утёк чужой брендинг; владелец попросил обратное прямо, риск его.
+    Имя донора известно — берём его; неизвестно — работают прежние шаблоны.
 
     Жалоба владельца 2026-08-11: «у плейлистов одинаковые название одни и те же»,
     «надо более кликабельные, больше байта, без цензуры можно добавить». Отсюда две
@@ -223,6 +238,8 @@ def build_title(
 
     Уже использованные недавно варианты не берём; все заняты — берём любой, потому что
     сборник без названия хуже, чем сборник с повторным."""
+    if original.strip() and original_template.strip():
+        return original_template.format(original=original.strip(), year=now.year).strip()
     if not templates:
         return f"Музыка без цензуры {now.year}"
     names = ", ".join(artists or [])
@@ -371,6 +388,11 @@ def _deliver(
     Сбой отдачи не роняет тик: сборник важнее, публикация пойдёт с исходного пути.
     Повторная попытка того же плейлиста файл не дублирует — см. `delivered`."""
     settings = config.youtube_playlists
+    if not settings.deliver_enabled:
+        # ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать». Файл остаётся
+        # на диске и публикуется в VK как обычно — меняется только отправка владельцу.
+        get_logger().info("Отдача сборников в Telegram выключена — публикую только в VK")
+        return compilation.video_path
     if playlist.delivered:
         get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
         return compilation.video_path
