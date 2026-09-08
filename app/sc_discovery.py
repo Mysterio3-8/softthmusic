@@ -80,20 +80,33 @@ def build_source_url(source: str, limit: int) -> str:
     return f"scsearch{max(1, limit)}:{text}"
 
 
-def is_blocked(ref: "TrackRef", blocked_words: tuple[str, ...] | list[str]) -> bool:
-    """Трек под запретом владельца: украинский или про войну.
+def is_blocked_text(text: str, blocked_words: tuple[str, ...] | list[str]) -> bool:
+    """Запрещён ли трек по названию и исполнителю: украинский или про войну.
+
+    Отдельно от `is_blocked` потому, что тем же правилом обязаны проверяться и треки
+    СБОРНИКОВ с YouTube: там нет TrackRef, а запрет владельца от источника не зависит.
 
     Слово ищем как ОТДЕЛЬНОЕ (границы слова), иначе «ВСУ» срабатывало бы внутри
     безобидных слов и выкидывало нормальные треки."""
-    haystack = f"{ref.title} {ref.artist}"
-    if _UKRAINIAN.search(haystack):
+    if _UKRAINIAN.search(text):
         return True
-    lowered = haystack.lower()
+    lowered = text.lower()
     return any(
         re.search(rf"\b{re.escape(word.lower())}\b", lowered)
         for word in blocked_words
         if word.strip()
     )
+
+
+def is_western_text(text: str) -> bool:
+    """Западный ли трек. Признак — отсутствие кириллицы в названии и исполнителе."""
+    return not _CYRILLIC.search(text)
+
+
+def is_blocked(ref: "TrackRef", blocked_words: tuple[str, ...] | list[str]) -> bool:
+    """Трек под запретом владельца: украинский или про войну."""
+    haystack = f"{ref.title} {ref.artist}"
+    return is_blocked_text(haystack, blocked_words)
 
 
 def discover_tracks(

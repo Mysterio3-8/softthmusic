@@ -60,7 +60,7 @@ def deliver(
     2. **Bot API** — только если файл вдруг мелкий (короткий плейлист).
     3. **ready/ + команда scp** — когда ни один канал не настроен.
     """
-    stored = _store(video_path, ready_dir, file_name)
+    stored = store_in_ready(video_path, ready_dir, file_name)
     size_mb = stored.stat().st_size / 1e6
 
     if uploader is not None and uploader.send_file(stored, caption):
@@ -76,7 +76,11 @@ def deliver(
     return DeliveryResult(stored, False, f"лежит на сервере ({size_mb:.0f} МБ)\n{hint}")
 
 
-def _store(video_path: Path, ready_dir: Path, file_name: str) -> Path:
+def store_in_ready(video_path: Path, ready_dir: Path, file_name: str) -> Path:
+    """Перенести готовый сборник в ready/ и вернуть новый путь.
+
+    Публичная — нужна и когда отправка владельцу выключена: рабочий каталог сборника
+    удаляется в `finally`, и файл, оставленный там, исчезнет вместе с ним."""
     ready_dir.mkdir(parents=True, exist_ok=True)
     target = ready_dir / file_name
     shutil.move(str(video_path), target)

@@ -351,3 +351,75 @@ def test_templates_still_work_when_the_donor_name_is_unknown():
     )
 
     assert title == "Miyagi — микс 2026"
+
+
+def _track(title: str, artist: str = "", position: int = 1):
+    from app.soundcloud import Track
+
+    return Track(
+        position=position,
+        title=title,
+        artist=artist,
+        duration_s=180,
+        audio_path=Path("/tmp/a.mp3"),
+        cover_path=None,
+    )
+
+
+def _config_with_rules(*, western_only: bool):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        soundcloud=SimpleNamespace(
+            discovery=SimpleNamespace(
+                western_only=western_only, blocked_words=["СВО", "ВСУ", "ЗСУ"]
+            )
+        )
+    )
+
+
+def test_playlist_drops_blocked_and_russian_tracks():
+    """Запрос к YouTube — это только запрос: в чужом пользовательском плейлисте может
+    оказаться что угодно, и без проверки после скачивания русский или украинский трек
+    доехал бы до стены внутри сборника, мимо всех фильтров."""
+    from app.yt_playlists import filter_tracks
+
+    tracks = [
+        _track("Blinding Lights", "The Weeknd", 1),
+        _track("Песня про ВСУ", "Кто-то", 2),
+        _track("Дистанция", "Артист", 3),
+        _track("Levitating", "Dua Lipa", 4),
+        _track("Take Five", "Brubeck", 5),
+    ]
+
+    kept = filter_tracks(tracks, _config_with_rules(western_only=True))
+
+    assert [t.title for t in kept] == ["Blinding Lights", "Levitating", "Take Five"]
+    # Позиции перенумерованы: по ним строятся порядок склейки и тайм-коды описания.
+    assert [t.position for t in kept] == [1, 2, 3]
+
+
+def test_playlist_is_refused_when_too_little_survives():
+    """Три трека — уже не подборка, а огрызок: такой сборник не собираем."""
+    from app.yt_playlists import YouTubeSourceError, filter_tracks
+
+    tracks = [_track("Дистанция", "Артист", 1), _track("Levitating", "Dua Lipa", 2)]
+
+    with pytest.raises(YouTubeSourceError):
+        filter_tracks(tracks, _config_with_rules(western_only=True))
+
+
+def test_russian_tracks_survive_when_western_only_is_off():
+    """Запрет на военное и украинское действует всегда, «только западные» — настройка."""
+    from app.yt_playlists import filter_tracks
+
+    tracks = [
+        _track("Дистанция", "Артист", 1),
+        _track("Песня про ЗСУ", "Кто-то", 2),
+        _track("Levitating", "Dua Lipa", 3),
+        _track("Take Five", "Brubeck", 4),
+    ]
+
+    kept = filter_tracks(tracks, _config_with_rules(western_only=False))
+
+    assert [t.title for t in kept] == ["Дистанция", "Levitating", "Take Five"]

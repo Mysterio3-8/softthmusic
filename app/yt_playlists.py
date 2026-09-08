@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import random
 import shutil
 from dataclasses import dataclass
@@ -25,9 +26,10 @@ from pathlib import Path
 from app.album_db import AlbumQueue
 from app.album_scheduler import is_quiet_hour, now_msk, to_msk
 from app.config import Config
-from app.delivery import cleanup_ready, deliver
+from app.delivery import cleanup_ready, deliver, store_in_ready
 from app.logger import get_logger
 from app.media import MediaError, concat_videos, render_track_video
+from app.sc_discovery import is_blocked_text, is_western_text
 from app.notifier import Notifier
 from app.overlay import TrackCaption
 from app.post_builder import build_tracklist
@@ -185,6 +187,7 @@ def build_compilation(
     """Скачать треки, собрать видео и все тексты. Без сети VK — тестируется отдельно."""
     settings = config.youtube_playlists
     tracks = download_playlist(playlist.url, work_dir, settings.max_tracks)
+    tracks = filter_tracks(tracks, config)
     _ensure_own_covers(tracks)
 
     title = build_title(
@@ -207,6 +210,43 @@ def build_compilation(
         description=build_description(config, title, tracklist, tracks),
         tracks=tracks,
     )
+
+
+MIN_TRACKS_AFTER_FILTER = 3
+"""Меньше этого сборник не собираем: три трека — уже не подборка, а огрызок."""
+
+
+def filter_tracks(tracks: list[Track], config: Config) -> list[Track]:
+    """Выбросить из сборника треки, которые владелец брать запретил.
+
+    Запросы к YouTube — это ТОЛЬКО запросы, а не проверка: по «top hits playlist»
+    приезжает чужой пользовательский плейлист, и что внутри — заранее неизвестно.
+    Поэтому те же правила, что у поиска треков (`sc_discovery`), применяются и здесь,
+    уже после скачивания: иначе русский или украинский трек спокойно доехал бы до
+    стены внутри сборника, мимо всех фильтров.
+
+    Правила берём из настроек автопоиска — они общие для софта, а не свойство
+    конкретного потока; дублировать их вторым набором ключей значило бы однажды
+    поменять один и забыть про другой."""
+    rules = config.soundcloud.discovery
+    kept: list[Track] = []
+    for track in tracks:
+        text = f"{track.title} {track.artist}"
+        if is_blocked_text(text, rules.blocked_words):
+            get_logger().info("Сборник: выбрасываю «%s» — запрещённый трек", text.strip())
+            continue
+        if rules.western_only and not is_western_text(text):
+            get_logger().info("Сборник: выбрасываю «%s» — не западный", text.strip())
+            continue
+        kept.append(track)
+
+    if len(kept) < MIN_TRACKS_AFTER_FILTER:
+        raise YouTubeSourceError(
+            f"после фильтра осталось треков: {len(kept)} — сборник не собираем"
+        )
+    # Позиции перенумеровываем: по ним строится порядок склейки и тайм-коды описания,
+    # а после выброса в середине они становятся дырявыми.
+    return [dataclasses.replace(track, position=index) for index, track in enumerate(kept, 1)]
 
 
 def build_title(
@@ -389,10 +429,14 @@ def _deliver(
     Повторная попытка того же плейлиста файл не дублирует — см. `delivered`."""
     settings = config.youtube_playlists
     if not settings.deliver_enabled:
-        # ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать». Файл остаётся
-        # на диске и публикуется в VK как обычно — меняется только отправка владельцу.
-        get_logger().info("Отдача сборников в Telegram выключена — публикую только в VK")
-        return compilation.video_path
+        # ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать». Меняется только
+        # отправка; сам файл по-прежнему сохраняем в ready/ — рабочий каталог сборника
+        # удаляется в `finally` вызывающего, и оставленный там файл исчез бы вместе с
+        # ним, сломав ручную заливку на YouTube.
+        get_logger().info("Отдача сборников в Telegram выключена — сохраняю в ready/")
+        return store_in_ready(
+            compilation.video_path, settings.ready_dir, _safe_file_name(compilation.title)
+        )
     if playlist.delivered:
         get_logger().info("Сборник %s уже отдавали владельцу — не дублируем", playlist.url)
         return compilation.video_path

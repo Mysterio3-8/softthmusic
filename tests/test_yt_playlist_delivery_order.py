@@ -107,8 +107,9 @@ def test_notification_says_it_is_publishing_not_published(tmp_path, queue):
 def test_delivery_is_skipped_when_disabled(tmp_path, queue):
     """ТЗ владельца 2026-09-05: «в тг ничего не надо мне присылать».
 
-    Сборник по-прежнему публикуется в VK — путь к файлу возвращается прежний, — но
-    владельцу ничего не уходит и отметка «отдан» не ставится."""
+    Владельцу ничего не уходит и отметка «отдан» не ставится, НО файл обязан уцелеть:
+    рабочий каталог сборника удаляется в `finally` вызывающего, и оставленный там файл
+    исчез бы вместе с ним, сломав ручную заливку на YouTube."""
     config = _Config(tmp_path)
     config.youtube_playlists.deliver_enabled = False
     queue.add("https://youtube.com/playlist?list=1", "Сборник", "автор", "источник")
@@ -117,5 +118,7 @@ def test_delivery_is_skipped_when_disabled(tmp_path, queue):
 
     path = _deliver(config, queue, row, compilation, FakeNotifier())
 
-    assert path == compilation.video_path
+    assert path.exists(), "файл должен уцелеть"
+    assert path.parent.name == "ready"
+    assert not compilation.video_path.exists(), "из рабочего каталога он перенесён"
     assert queue.next_pending().delivered is False
